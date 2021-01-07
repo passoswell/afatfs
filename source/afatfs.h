@@ -18,7 +18,9 @@
 #define AFATS_MAX_DISKS                                                        1
 #endif
 
-
+#ifndef AFATS_MAX_PARTITIONS
+#define AFATS_MAX_PARTITIONS                                                   4
+#endif
 
 void AFATFS_Test(void);
 
