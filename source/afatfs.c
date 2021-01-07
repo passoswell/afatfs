@@ -43,7 +43,7 @@ typedef enum
 
 
 /**
- * @brief Complete structure of a primary partition record for FAT32.
+ * @brief Complete structure of a primary partition record for FAT32, sector 0.
  */
 typedef struct __attribute__((packed))
 {
@@ -57,16 +57,91 @@ typedef struct __attribute__((packed))
 
 
 /**
+ * @brief Complete (0x5A bytes) BIOS parameter block FAT32, sector 0.
+ */
+typedef struct __attribute__((packed))
+{
+  uint8_t jump[3];
+  uint8_t softName[8];
+  uint16_t bytesPerSector;
+  uint8_t sectorsPerCluster;
+  uint16_t reservedSectors;
+  uint8_t fatCopies;
+  uint16_t rootDirEntries;
+  uint16_t totalSectors;
+  uint8_t mediaType;
+  uint16_t fatSectorCount;
+  uint16_t sectorsPerTrack;
+  uint16_t headCount;
+  uint32_t hiddenSectors;
+  uint32_t totalSectorCount;
+
+  uint32_t tableSize;
+  uint16_t extFlags;
+  uint16_t fatVersion;
+  uint32_t rootCluster;
+  uint16_t fatInfo;
+  uint16_t backupSector;
+  uint8_t reserved0[12];
+  uint8_t driveNumber;
+  uint8_t reserved;
+  uint8_t bootSignature;
+  uint32_t volumeId;
+  uint8_t volumeLabel[11];
+  uint8_t fatTypeLabel[8];
+}PartitionParameterRecord_t;
+
+
+
+typedef struct __attribute__((packed))
+{
+  uint8_t name[8];
+  uint8_t ext[3];
+  uint8_t attributes;
+  uint8_t reserved;
+  uint8_t cTimeTenth;
+  uint16_t cTime;
+  uint16_t cDate;
+  uint16_t aTime;
+  uint16_t firstClusterHi;
+  uint16_t wTime;
+  uint16_t wDate;
+  uint16_t firstClusterLow;
+  uint32_t size;
+}DirectoryEntryFat32_t;
+
+
+
+/**
  * @brief Simplified structure of a boot sector for FAT32.
  */
-struct
+typedef struct
 {
-  /* PartitionTableEntry_t PrimaryPartition[4]; */
   FatType_t FatType[4];    /*!< Partitions type */
   uint32_t  StartLBA[4];   /*!< Start sector for the partitions */
   uint32_t  LengthLBA[4];  /*!< Size in sectors of the partitions */
   uint16_t  Signature;
-}MasterBootRecord[AFATS_MAX_DISKS];
+}ReducedMasterBootRecord_t;
+
+/**
+ * @brief Simplified partition parameter block for FAT32.
+ */
+typedef struct
+{
+  uint32_t FatStartSector[4];
+  uint32_t FatSize[4];
+  uint32_t DataStartSector[4];
+  uint32_t RootSector[4];
+}ReducedPartitionParameterRecord_t;
+
+
+struct
+{
+  ReducedMasterBootRecord_t MBR;
+  uint32_t                  RootSector[4];
+  DirectoryEntryFat32_t     RootDir[16];
+}FatDisk[AFATS_MAX_DISKS];
+
 
 
 EStatus_t AFATFS_ReadBootSector(uint8_t Disk)
@@ -81,23 +156,23 @@ EStatus_t AFATFS_ReadBootSector(uint8_t Disk)
     returncode = DISK_Read(Disk, buffer, 0, 1);
     if(returncode == ANSWERED_REQUEST)
     {
-      memcpy(&MasterBootRecord[Disk].Signature,
+      memcpy(&FatDisk[Disk].MBR.Signature,
           &buffer[FAT_SIGNATURE_OFFSET], 2);
       /* Verifying the FAT boot sector signature */
-      if(MasterBootRecord[Disk].Signature == FAT_BOOT_SIGNATURE)
+      if(FatDisk[Disk].MBR.Signature == FAT_BOOT_SIGNATURE)
       {
         /* Saving the FAT type, the partition's start sector and length */
         for(i = 0; i < FAT_PARTITION_QTY; i++)
         {
-          MasterBootRecord[Disk].FatType[i] =
+          FatDisk[Disk].MBR.FatType[i] =
               buffer[FAT_PARTITION_RECORD0_OFFSET +
                      (FAT_PARTITION_RECORD_SIZE * i) +
                      FAT_TYPE_OF_PARTITION_OFFSET];
-          memcpy(&MasterBootRecord[Disk].StartLBA[i],
+          memcpy(&FatDisk[Disk].MBR.StartLBA[i],
                  &buffer[FAT_PARTITION_RECORD0_OFFSET +
                         (FAT_PARTITION_RECORD_SIZE * i) +
                         FAT_START_LBA_OFFSET], 4);
-          memcpy(&MasterBootRecord[Disk].LengthLBA[i],
+          memcpy(&FatDisk[Disk].MBR.LengthLBA[i],
                  &buffer[FAT_PARTITION_RECORD0_OFFSET +
                         (FAT_PARTITION_RECORD_SIZE * i) +
                         FAT_LENGTH_OFFSET], 4);
@@ -106,6 +181,60 @@ EStatus_t AFATFS_ReadBootSector(uint8_t Disk)
         /* Failed to find a FAT file system */
         returncode = ERR_FAILED;
       }
+    }
+
+  }else{
+    returncode = ERR_PARAM_ID;
+  }
+
+  return returncode;
+}
+
+
+
+EStatus_t AFATFS_ReadBiosParameter(uint8_t Disk)
+{
+  PartitionParameterRecord_t Parameters;
+  EStatus_t returncode = OPERATION_RUNNING;
+  static uint8_t buffer[512];
+  uint32_t fatStart, fatSize, dataStart;
+
+  if(Disk < AFATS_MAX_DISKS)
+  {
+
+    returncode = DISK_Read(Disk, buffer, FatDisk[Disk].MBR.StartLBA[0], 1);
+    if(returncode == ANSWERED_REQUEST)
+    {
+      memcpy(&Parameters, buffer, sizeof(Parameters));
+
+      fatStart = FatDisk[Disk].MBR.StartLBA[0] + Parameters.reservedSectors;
+      fatSize = Parameters.tableSize;
+      dataStart = fatStart + (fatSize * Parameters.fatCopies);
+      FatDisk[Disk].RootSector[Disk] = dataStart +
+          Parameters.sectorsPerCluster * (Parameters.rootCluster - 2);
+    }
+
+  }else{
+    returncode = ERR_PARAM_ID;
+  }
+
+  return returncode;
+}
+
+
+
+EStatus_t AFATFS_ReadRootDirEntry(uint8_t Disk)
+{
+  EStatus_t returncode = OPERATION_RUNNING;
+  static uint8_t buffer[512];
+
+  if(Disk < AFATS_MAX_DISKS)
+  {
+
+    returncode = DISK_Read(Disk, buffer, FatDisk[Disk].RootSector[0], 1);
+    if(returncode == ANSWERED_REQUEST)
+    {
+      memcpy(&FatDisk[Disk].RootDir, buffer, sizeof(FatDisk[Disk].RootDir));
     }
 
   }else{
@@ -149,6 +278,20 @@ void AFATFS_Test(void)
       break;
 
     case 3:
+      returncode = AFATFS_ReadBiosParameter(0);
+      if(returncode == ANSWERED_REQUEST){
+        state = 4;
+      }
+      break;
+
+    case 4:
+      returncode = AFATFS_ReadRootDirEntry(0);
+      if(returncode == ANSWERED_REQUEST){
+        state = 5;
+      }
+      break;
+
+    case 5:
       break;
 
     default:
