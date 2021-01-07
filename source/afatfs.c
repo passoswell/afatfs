@@ -2,8 +2,7 @@
 #include "afatfs.h"
 #include "disk.h"
 #include "afatfs_types.h"
-
-
+#include "map_afatfs.h"
 
 
 /**
@@ -39,10 +38,12 @@ typedef struct
 
 struct
 {
+  uint8_t                          isInitialized;
   ReducedMasterBootRecord_t        MBR;
   ReducedPartitionParameterTable_t PPR;
   DirectoryEntryFat32_t            RootDir[AFATS_MAX_PARTITIONS][16];
-  uint8_t Buffer[AFATFS_MAX_SECTOR_SIZE];
+  uint8_t                          Buffer[AFATFS_MAX_SECTOR_SIZE];
+  /* DiskIO_t                         DiskIO; */
 }FatDisk[AFATS_MAX_DISKS];
 
 
@@ -208,64 +209,103 @@ EStatus_t AFATFS_ReadFile(uint8_t Disk, uint8_t Partition)
 
 void AFATFS_Test(void)
 {
+  enum{DISK_INIT = 0, READ_BOOT, READ_BIOS, READ_ROOT, READ_FILE, NOP };
   EStatus_t returncode;
-  static uint8_t state = 0;
+  static uint8_t state = DISK_INIT;
 
   while(1)
   {
 
     switch(state)
     {
-    case 0:
-      returncode = DISK_IntHwInit(0);
+    case DISK_INIT:
+      returncode = AFATFS_Mount(0);
       if(returncode == ANSWERED_REQUEST){
-        state = 1;
+        state = READ_BOOT;
       }
       break;
 
-    case 1:
-      returncode = DISK_ExtHwConfig(0);
-      if(returncode == ANSWERED_REQUEST){
-        state = 2;
-      }
-      break;
-
-    case 2:
+    case READ_BOOT:
       returncode = AFATFS_ReadBootSector(0);
       if(returncode == ANSWERED_REQUEST){
-        state = 3;
+        state = READ_BIOS;
       }
       break;
 
-    case 3:
+    case READ_BIOS:
       returncode = AFATFS_ReadBiosParameter(0, 0);
       if(returncode == ANSWERED_REQUEST){
-        state = 4;
+        state = READ_ROOT;
       }
       break;
 
-    case 4:
+    case READ_ROOT:
       returncode = AFATFS_ReadRootDirEntry(0, 0);
       if(returncode == ANSWERED_REQUEST){
-        state = 5;
+        state = READ_FILE;
       }
       break;
 
-    case 5:
+    case READ_FILE:
       returncode = AFATFS_ReadFile(0, 0);
       if(returncode == ANSWERED_REQUEST){
-        state = 6;
+        state = NOP;
       }
       break;
 
-    case 6:
+    case NOP:
       break;
 
     default:
-      state = 0;
+      state = DISK_INIT;
       break;
     }
 
   }
 
+}
+
+
+
+
+EStatus_t AFATFS_Mount(uint8_t Disk)
+{
+  enum{INT_HW_INIT = 0, EXT_DEV_CONFIG};
+  EStatus_t returncode = OPERATION_RUNNING;
+  static uint8_t state[AFATS_MAX_DISKS];
+
+  if(Disk < AFATS_MAX_DISKS && Disk < DIsk_ListSize)
+  {
+    if(Disk_List[Disk].IntHwInit != NULL &&
+        Disk_List[Disk].ExtDevConfig != NULL &&
+        Disk_List[Disk].Read != NULL && Disk_List[Disk].Write != NULL)
+    {
+      switch(state[Disk])
+      {
+      case INT_HW_INIT:
+        returncode = Disk_List[Disk].IntHwInit();
+        if( returncode == ANSWERED_REQUEST ){
+          returncode = OPERATION_RUNNING;
+          state[Disk] = 1;
+        }
+        break;
+
+      case EXT_DEV_CONFIG:
+        returncode = Disk_List[Disk].ExtDevConfig();
+        if( returncode == ANSWERED_REQUEST ){
+          FatDisk[Disk].isInitialized = 1;
+          state[Disk] = 0;
+        }else if(returncode >= RETURN_ERROR_VALUE){
+          state[Disk] = 0;
+        }
+        break;
+
+      default:
+        state[Disk] = 0;
+        break;
+      }
+    }
+  }
+
+  return returncode;
 }

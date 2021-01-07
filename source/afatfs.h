@@ -12,6 +12,7 @@
 #define AFATFS_H
 
 
+#include <stdint.h>
 #include "stdstatus.h"
 
 
@@ -62,5 +63,15 @@
  * @brief Test function.
  */
 void AFATFS_Test(void);
+
+
+/**
+ * @brief  This routine configures a specified disk.
+ * @param  Disk : A number that will identify the disk.
+ * @param  DiskIO : Pointers to functions that give access to the disk.
+ * @retval EStatus_t
+ */
+EStatus_t AFATFS_Mount(uint8_t Disk);
+
 
 #endif /* AFATFS_H */
