@@ -48,7 +48,7 @@ struct
 
 
 
-EStatus_t AFATFS_ReadBootSector(uint8_t Disk)
+static EStatus_t AFATFS_ReadBootSector(uint8_t Disk)
 {
   EStatus_t returncode = OPERATION_RUNNING;
   uint32_t i;
@@ -56,7 +56,7 @@ EStatus_t AFATFS_ReadBootSector(uint8_t Disk)
   if(Disk < AFATS_MAX_DISKS)
   {
 
-    returncode = DISK_Read(Disk, FatDisk[Disk].Buffer, 0, 1);
+    returncode = Disk_List[Disk].Read(FatDisk[Disk].Buffer, 0, 1);
     if(returncode == ANSWERED_REQUEST)
     {
       memcpy(&FatDisk[Disk].MBR.Signature,
@@ -100,7 +100,7 @@ EStatus_t AFATFS_ReadBootSector(uint8_t Disk)
 
 
 
-EStatus_t AFATFS_ReadBiosParameter(uint8_t Disk, uint8_t Partition)
+static EStatus_t AFATFS_ReadBiosParameter(uint8_t Disk, uint8_t Partition)
 {
   PartitionParameterTable_t Parameters;
   EStatus_t returncode = OPERATION_RUNNING;
@@ -112,7 +112,7 @@ EStatus_t AFATFS_ReadBiosParameter(uint8_t Disk, uint8_t Partition)
     if(FatDisk[Disk].MBR.FatType[Partition] == FAT32_LBA)
     {
 
-      returncode = DISK_Read(Disk, FatDisk[Disk].Buffer,
+      returncode = Disk_List[Disk].Read(FatDisk[Disk].Buffer,
           FatDisk[Disk].MBR.StartLBA[Partition], 1);
       if(returncode == ANSWERED_REQUEST)
       {
@@ -128,7 +128,8 @@ EStatus_t AFATFS_ReadBiosParameter(uint8_t Disk, uint8_t Partition)
         FatDisk[Disk].PPR.FatStartSector[Partition] = fatStart;
         FatDisk[Disk].PPR.FatSize[Partition] = fatSize;
         FatDisk[Disk].PPR.DataStartSector[Partition] = dataStart;
-        FatDisk[Disk].PPR.SectorPerCluster[Partition] = Parameters.sectorsPerCluster;
+        FatDisk[Disk].PPR.SectorPerCluster[Partition] =
+            Parameters.sectorsPerCluster;
       }
 
     }else{
@@ -144,7 +145,7 @@ EStatus_t AFATFS_ReadBiosParameter(uint8_t Disk, uint8_t Partition)
 
 
 
-EStatus_t AFATFS_ReadRootDirEntry(uint8_t Disk, uint8_t Partition)
+static EStatus_t AFATFS_ReadRootDirEntry(uint8_t Disk, uint8_t Partition)
 {
   EStatus_t returncode = OPERATION_RUNNING;
 
@@ -154,7 +155,7 @@ EStatus_t AFATFS_ReadRootDirEntry(uint8_t Disk, uint8_t Partition)
     if(FatDisk[Disk].MBR.FatType[Partition] == FAT32_LBA)
     {
 
-      returncode = DISK_Read(Disk, FatDisk[Disk].Buffer,
+      returncode = Disk_List[Disk].Read(FatDisk[Disk].Buffer,
           FatDisk[Disk].PPR.RootSector[Partition], 1);
       if(returncode == ANSWERED_REQUEST)
       {
@@ -175,7 +176,7 @@ EStatus_t AFATFS_ReadRootDirEntry(uint8_t Disk, uint8_t Partition)
 
 
 
-EStatus_t AFATFS_ReadFile(uint8_t Disk, uint8_t Partition)
+static EStatus_t AFATFS_ReadFile(uint8_t Disk, uint8_t Partition)
 {
   EStatus_t returncode = OPERATION_RUNNING;
 
@@ -186,7 +187,7 @@ EStatus_t AFATFS_ReadFile(uint8_t Disk, uint8_t Partition)
 //    if(FatDisk[Disk].MBR.FatType[Partition] == FAT32_LBA)
 //    {
 //
-//      returncode = DISK_Read(Disk, FatDisk[Disk].Buffer,
+//      returncode = Disk_List[Disk].Read(FatDisk[Disk].Buffer,
 //          FatDisk[Disk].PPR.RootSector[Partition], 1);
 //      if(returncode == ANSWERED_REQUEST)
 //      {
@@ -209,7 +210,7 @@ EStatus_t AFATFS_ReadFile(uint8_t Disk, uint8_t Partition)
 
 void AFATFS_Test(void)
 {
-  enum{DISK_INIT = 0, READ_BOOT, READ_BIOS, READ_ROOT, READ_FILE, NOP };
+  enum{DISK_INIT = 0, READ_ROOT, READ_FILE, NOP };
   EStatus_t returncode;
   static uint8_t state = DISK_INIT;
 
@@ -221,20 +222,6 @@ void AFATFS_Test(void)
     case DISK_INIT:
       returncode = AFATFS_Mount(0);
       if(returncode == ANSWERED_REQUEST){
-        state = READ_BOOT;
-      }
-      break;
-
-    case READ_BOOT:
-      returncode = AFATFS_ReadBootSector(0);
-      if(returncode == ANSWERED_REQUEST){
-        state = READ_BIOS;
-      }
-      break;
-
-    case READ_BIOS:
-      returncode = AFATFS_ReadBiosParameter(0, 0);
-      if(returncode == ANSWERED_REQUEST){
         state = READ_ROOT;
       }
       break;
@@ -242,7 +229,7 @@ void AFATFS_Test(void)
     case READ_ROOT:
       returncode = AFATFS_ReadRootDirEntry(0, 0);
       if(returncode == ANSWERED_REQUEST){
-        state = READ_FILE;
+        state = NOP;
       }
       break;
 
@@ -270,7 +257,7 @@ void AFATFS_Test(void)
 
 EStatus_t AFATFS_Mount(uint8_t Disk)
 {
-  enum{INT_HW_INIT = 0, EXT_DEV_CONFIG};
+  enum{INT_HW_INIT = 0, EXT_DEV_CONFIG, READ_BOOT, READ_BIOS, NOP};
   EStatus_t returncode = OPERATION_RUNNING;
   static uint8_t state[AFATS_MAX_DISKS];
 
@@ -286,22 +273,48 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
         returncode = Disk_List[Disk].IntHwInit();
         if( returncode == ANSWERED_REQUEST ){
           returncode = OPERATION_RUNNING;
-          state[Disk] = 1;
+          state[Disk] = EXT_DEV_CONFIG;
         }
         break;
 
       case EXT_DEV_CONFIG:
         returncode = Disk_List[Disk].ExtDevConfig();
         if( returncode == ANSWERED_REQUEST ){
-          FatDisk[Disk].isInitialized = 1;
-          state[Disk] = 0;
+          returncode = OPERATION_RUNNING;
+          state[Disk] = READ_BOOT;
         }else if(returncode >= RETURN_ERROR_VALUE){
-          state[Disk] = 0;
+          state[Disk] = EXT_DEV_CONFIG;
         }
         break;
 
+      case READ_BOOT:
+        returncode = AFATFS_ReadBootSector(0);
+        if(returncode == ANSWERED_REQUEST){
+          returncode = OPERATION_RUNNING;
+          state[Disk] = READ_BIOS;
+        }else if(returncode >= RETURN_ERROR_VALUE){
+          state[Disk] = EXT_DEV_CONFIG;
+        }
+        break;
+
+      case READ_BIOS:
+        returncode = AFATFS_ReadBiosParameter(0, 0);
+        if(returncode == ANSWERED_REQUEST){
+          FatDisk[Disk].isInitialized = 1;
+          state[Disk] = NOP;
+        }else if(returncode >= RETURN_ERROR_VALUE){
+          state[Disk] = EXT_DEV_CONFIG;
+        }
+        break;
+
+      case NOP:
+        /* Will configure the disk again */
+        FatDisk[Disk].isInitialized = 0;
+        state[Disk] = EXT_DEV_CONFIG;
+        break;
+
       default:
-        state[Disk] = 0;
+        state[Disk] = INT_HW_INIT;
         break;
       }
     }
