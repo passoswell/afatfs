@@ -45,6 +45,15 @@
 #define AFATFS_MAX_SECTOR_SIZE                                               512
 #endif
 
+
+/**
+ * @brief Max number of files opened simultaneously per disk.
+ */
+#ifndef AFATS_MAX_FILES
+#define AFATS_MAX_FILES                                                        4
+#endif
+
+
 /**
  * @brief Internal file buffer size as a multiple of sector size.
  */
@@ -72,6 +81,21 @@ void AFATFS_Test(void);
  * @retval EStatus_t
  */
 EStatus_t AFATFS_Mount(uint8_t Disk);
+
+
+/**
+ * @brief  This routine configures a specified disk.
+ * @param  Disk : A number that will identify the disk.
+ * @param  Partition : A number that will identify a partition.
+ * @param  FileName : A string containing the file name.
+ * @param  Mode : The mode in wich the file will be opened.
+ * @param  FileToken : A value returned by the function to identify the file.
+ * @retval EStatus_t
+ */
+EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
+    uint8_t Mode, uint8_t *FileHandle);
+
+
 
 
 #endif /* AFATFS_H */

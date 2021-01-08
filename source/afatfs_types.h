@@ -126,19 +126,19 @@ typedef struct __attribute__((packed))
  */
 typedef struct __attribute__((packed))
 {
-  uint8_t name[8];           /*!< File name (8 chars, padded with spaces) */
-  uint8_t ext[3];            /*!< File extension (3 char, padded with spaces */
-  uint8_t attributes;        /*!< Combination of FAT32 file attributes */
-  uint8_t reserved;
+  uint8_t Name[8];           /*!< File name (8 chars, padded with spaces) */
+  uint8_t Ext[3];            /*!< File extension (3 char, padded with spaces */
+  uint8_t Attributes;        /*!< Combination of FAT32 file attributes */
+  uint8_t Reserved;
   uint8_t cTimeTenth;
   uint16_t cTime;
   uint16_t cDate;
   uint16_t aTime;
-  uint16_t firstClusterHi;
+  uint16_t FirstClusterHi;
   uint16_t wTime;
   uint16_t wDate;
-  uint16_t firstClusterLow;
-  uint32_t size;
+  uint16_t FirstClusterLow;
+  uint32_t Size;
 }DirectoryEntryFat32_t;
 
 

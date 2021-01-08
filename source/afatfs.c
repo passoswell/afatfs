@@ -6,23 +6,41 @@
 
 
 /**
+ * @brief Limiting the max number of files to 16.
+ */
+#if AFATS_MAX_FILES >= 16
+#define AFATS_MAX_FILES2                                                      16
+#else
+#define AFATS_MAX_FILES2                                         AFATS_MAX_FILES
+#endif
+
+
+/**
  * @brief File structure.
  */
 typedef struct
 {
-  uint32_t FirstCluster; /*!< The first cluster number of the file */
+  uint8_t Name[8]; /*!< 8 chars for name */
 
-  uint8_t Name[11]; /*!< 8 chars for name, 3 chars for extension, dot implied */
+  uint8_t Extension[3]; /*!< 3 chars for extension, dot implied */
+
+  uint32_t ClusterFirst; /*!< The first cluster number of the file */
+
+  uint32_t ClusterPos; /*!< The current file cluster */
+
+  uint32_t ClusterPrev; /*!< The previous file cluster */
+
+  uint32_t SectorFirst;
+
+  uint32_t SectorPos;
+
+  uint32_t SectorPrev;
 
   uint32_t FilePos; /*!< The byte offset of the cursor within the file */
 
   uint32_t LogicalSize; /*!< File size in bytes of data written to the file. */
 
   uint32_t PhysicalSize; /*!< Size allocated in bytes, multiple of cluster size*/
-
-  uint32_t ClusterPos; /*!< The current file cluster */
-
-  uint32_t ClusterPrevPos; /*!< The previous file cluster */
 
   uint8_t Mode; /*!< A combination of AFATFS_FILE_MODE_* flags */
 
@@ -31,6 +49,12 @@ typedef struct
   uint8_t Buffer[AFATFS_MAX_SECTOR_SIZE * AFATFS_FILEBUFFER_SIZE];
 
   uint8_t *pBuffer; /*!< Pointer to the buffer where data should be stored when recovered */
+
+  uint8_t Disk; /*!< Stores the disk from wich the file came */
+
+  uint8_t Partition; /*!< Stores te partition from which the file came */
+
+  uint8_t isInUse; /*!< Flags if the structure represents a valid file */
 
 } afatfsFile_t;
 
@@ -42,6 +66,7 @@ struct
   ReducedMasterBootRecord_t        MBR;
   ReducedPartitionParameterTable_t PPR;
   DirectoryEntryFat32_t            RootDir[AFATS_MAX_PARTITIONS][16];
+  afatfsFile_t                     File[AFATS_MAX_FILES2];
   uint8_t                          Buffer[AFATFS_MAX_SECTOR_SIZE];
   /* DiskIO_t                         DiskIO; */
 }FatDisk[AFATS_MAX_DISKS];
@@ -213,6 +238,7 @@ void AFATFS_Test(void)
   enum{DISK_INIT = 0, READ_ROOT, READ_FILE, NOP };
   EStatus_t returncode;
   static uint8_t state = DISK_INIT;
+  static uint8_t fileHandle;
 
   while(1)
   {
@@ -229,12 +255,12 @@ void AFATFS_Test(void)
     case READ_ROOT:
       returncode = AFATFS_ReadRootDirEntry(0, 0);
       if(returncode == ANSWERED_REQUEST){
-        state = NOP;
+        state = READ_FILE;
       }
       break;
 
     case READ_FILE:
-      returncode = AFATFS_ReadFile(0, 0);
+      returncode = AFATFS_Open(0, 0, "ASCII.TXT", 0, &fileHandle);
       if(returncode == ANSWERED_REQUEST){
         state = NOP;
       }
@@ -270,6 +296,7 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
       switch(state[Disk])
       {
       case INT_HW_INIT:
+        /* Initializing internal hardware */
         returncode = Disk_List[Disk].IntHwInit();
         if( returncode == ANSWERED_REQUEST ){
           returncode = OPERATION_RUNNING;
@@ -278,6 +305,7 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
         break;
 
       case EXT_DEV_CONFIG:
+        /* Configuring device */
         returncode = Disk_List[Disk].ExtDevConfig();
         if( returncode == ANSWERED_REQUEST ){
           returncode = OPERATION_RUNNING;
@@ -288,6 +316,7 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
         break;
 
       case READ_BOOT:
+        /* Reading boot sector (sector 0) */
         returncode = AFATFS_ReadBootSector(0);
         if(returncode == ANSWERED_REQUEST){
           returncode = OPERATION_RUNNING;
@@ -298,6 +327,7 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
         break;
 
       case READ_BIOS:
+        /* Reading what seems to be an extension of the boot sector */
         returncode = AFATFS_ReadBiosParameter(0, 0);
         if(returncode == ANSWERED_REQUEST){
           FatDisk[Disk].isInitialized = 1;
@@ -314,10 +344,167 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
         break;
 
       default:
+        /* What happened? Maybe cosmic rays */
         state[Disk] = INT_HW_INIT;
         break;
       }
     }
+  }else{
+    returncode = ERR_PARAM_VALUE;
+  }
+
+  return returncode;
+}
+
+
+
+EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
+    uint8_t Mode, uint8_t *FileHandle)
+{
+  enum{FETCH_NAME = 0, READ_ROOT_DIR, COPY_FILE_TO_BUFFER};
+  EStatus_t returncode = OPERATION_RUNNING;
+  static uint8_t state[AFATS_MAX_DISKS];
+  uint32_t i;
+
+  /* Variables used for file name's string manipulation */
+  const char forbidenChar[] = {'/', ':'};
+  char *p;
+  uint32_t nameSize, extensionSize;
+
+  if(Disk < AFATS_MAX_DISKS && Disk < DIsk_ListSize)
+  {
+    if(FatDisk[Disk].isInitialized == 1)
+    {
+      /*
+       * This piece of code performs the following:
+       * 1 - Find a file structure not in use.
+       * 2 - Fetch the file name. Verify if it is 8.3 or less, verify if there
+       *     are no subfolders in the name.
+       * 3 - Read root directory entry
+       * 4 - Search for the suplied file name in the root dir entry
+       */
+      switch(state[Disk]){
+      case FETCH_NAME:
+        returncode = OPERATION_RUNNING;
+        /* Verifying if there is a file structure free */
+        for(i = 0; i < AFATS_MAX_FILES2; i++){
+          if(!FatDisk[Disk].File[i].isInUse){
+            *FileHandle = i;
+            break;
+          }
+        }
+        if(i >= AFATS_MAX_FILES2){
+          returncode = ERR_RESOURCE_DEPLETED;
+        }
+
+        /* Validating file name
+         * Subfolders not implemented, disk identifiers not allowed */
+        if(returncode == OPERATION_RUNNING){
+          for(i = 0; i < sizeof(forbidenChar); i++){
+            p = strchr(FileName,forbidenChar[i]);
+            if(p != NULL){
+              returncode = ERR_PARAM_NAME;
+              break;
+            }
+          }
+        }
+
+        /* Validating file name - sizing and saving to file structure */
+        if(returncode == OPERATION_RUNNING){
+          p = strchr(FileName,'.');
+          if(p != NULL){
+            /* File has extension */
+            nameSize = p - FileName;
+            extensionSize = strlen(FileName) - nameSize -1;
+            if(nameSize <= 8 && extensionSize <= 3 ){
+              /* Completing with spaces */
+              memset(FatDisk[Disk].File[*FileHandle].Name, ' ', 8);
+              memset(FatDisk[Disk].File[*FileHandle].Extension, ' ', 3);
+              /* Copying the name */
+              memcpy(FatDisk[Disk].File[*FileHandle].Name, FileName, nameSize);
+              /* Copying the extension */
+              memcpy(FatDisk[Disk].File[*FileHandle].Extension,
+                  FileName + nameSize + 1 , extensionSize);
+              FatDisk[Disk].File[*FileHandle].isInUse = 1;
+              state[Disk] = READ_ROOT_DIR;
+            }else{
+              returncode = ERR_PARAM_NAME;
+            }
+          }else{
+            /* File has no extension */
+            nameSize = strlen(FileName);
+            if(nameSize <= 8){
+              /* Completing with spaces */
+              memset(FatDisk[Disk].File[*FileHandle].Name, ' ', 8);
+              memset(FatDisk[Disk].File[*FileHandle].Extension, ' ', 3);
+              /* Copying the name */
+              memcpy(FatDisk[Disk].File[*FileHandle].Name, FileName, nameSize);
+              FatDisk[Disk].File[*FileHandle].isInUse = 1;
+              state[Disk] = READ_ROOT_DIR;
+            }else{
+              returncode = ERR_PARAM_NAME;
+            }
+          }
+        }
+        break;
+
+      case READ_ROOT_DIR:
+        returncode = AFATFS_ReadRootDirEntry(0, 0);
+        if(returncode == ANSWERED_REQUEST){
+          /*Searching for file name within root entries*/
+          for(i = 0; i < 16; i++){
+            if(!memcmp(FatDisk[Disk].RootDir[Partition][i].Name,
+                       FatDisk[Disk].File[*FileHandle].Name, 8) &&
+               !memcmp(FatDisk[Disk].RootDir[Partition][i].Ext,
+                       FatDisk[Disk].File[*FileHandle].Extension, 3))
+            {
+              break;
+            }
+          }
+          if(i < 16){
+            /* File was found */
+            FatDisk[Disk].File[*FileHandle].Disk = Disk;
+            FatDisk[Disk].File[*FileHandle].Partition = Partition;
+            FatDisk[Disk].File[*FileHandle].FilePos = 0; /*Start of file*/
+            FatDisk[Disk].File[*FileHandle].LogicalSize =
+                FatDisk[Disk].RootDir[Partition][i].Size;
+
+            FatDisk[Disk].File[*FileHandle].ClusterFirst =
+                (uint32_t) FatDisk[Disk].RootDir[Partition][i].FirstClusterHi << 16 |
+                FatDisk[Disk].RootDir[Partition][i].FirstClusterLow;
+            FatDisk[Disk].File[*FileHandle].ClusterPos =
+                FatDisk[Disk].File[*FileHandle].ClusterFirst;
+            FatDisk[Disk].File[*FileHandle].ClusterPrev = 0; /*Invalid value*/
+
+            FatDisk[Disk].File[*FileHandle].SectorFirst =
+                FatDisk[Disk].PPR.DataStartSector[Partition] +
+                ( FatDisk[Disk].PPR.SectorPerCluster[Partition] *
+                (FatDisk[Disk].File[*FileHandle].ClusterFirst - 2) );
+            FatDisk[Disk].File[*FileHandle].SectorPos =
+                FatDisk[Disk].File[*FileHandle].SectorFirst;
+            FatDisk[Disk].File[*FileHandle].SectorPrev = 0; /*Invalid value*/
+
+            FatDisk[Disk].File[*FileHandle].isInUse = 1;
+            returncode = ANSWERED_REQUEST;
+            state[Disk] = FETCH_NAME;
+          }else{
+            /* File was not found */
+            FatDisk[Disk].File[*FileHandle].isInUse = 0;
+            returncode = ERR_FAILED;
+            state[Disk] = FETCH_NAME;
+          }
+        }
+        break;
+
+      default:
+        state[Disk] = FETCH_NAME;
+        break;
+      }
+    }else{
+      returncode = ERR_DISABLED;
+    }
+  }else{
+    returncode = ERR_PARAM_VALUE;
   }
 
   return returncode;
