@@ -58,7 +58,7 @@
  * @brief Internal file buffer size as a multiple of sector size.
  */
 #ifndef AFATFS_FILEBUFFER_SIZE
-#define AFATFS_FILEBUFFER_SIZE                                                 8
+#define AFATFS_FILEBUFFER_SIZE                                                 4
 #endif
 
 
@@ -84,17 +84,28 @@ EStatus_t AFATFS_Mount(uint8_t Disk);
 
 
 /**
- * @brief  This routine configures a specified disk.
+ * @brief  This routine opens a file.
  * @param  Disk : A number that will identify the disk.
  * @param  Partition : A number that will identify a partition.
  * @param  FileName : A string containing the file name.
  * @param  Mode : The mode in wich the file will be opened.
- * @param  FileToken : A value returned by the function to identify the file.
+ * @param  FileHandle : A value returned by the function to identify the file.
  * @retval EStatus_t
  */
 EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
     uint8_t Mode, uint8_t *FileHandle);
 
+
+/**
+ * @brief  This routine reads data from a file.
+ * @param  FileHandle : A handle to the file.
+ * @param  Buffer : Buffer where data will be stores.
+ * @param  Size : Number of bytes desired.
+ * @param  BytesRead : Number of bytes efectively read.
+ * @retval EStatus_t
+ */
+EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint8_t Size,
+    uint8_t *BytesRead);
 
 
 
