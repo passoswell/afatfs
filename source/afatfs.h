@@ -120,5 +120,15 @@ EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size,
     uint32_t *BytesRead);
 
 
+/**
+ * @brief  This routine writes data to a file.
+ * @param  FileHandle : A handle to the file.
+ * @param  Buffer : Buffer with data to write.
+ * @param  Size : Number of bytes to write.
+ * @retval EStatus_t
+ * @note   The data is written to an offset set by a call to AFATFS_Read or
+ *         to AFATFS_Seek
+ */
+EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size);
 
 #endif /* AFATFS_H */

@@ -602,3 +602,23 @@ EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size,
 
   return returncode;
 }
+
+
+
+EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size)
+{
+  EStatus_t returncode = OPERATION_RUNNING;
+  uint32_t sectorFirst, sectorLast, nSectors, sectorOffset;
+  uint8_t Disk;
+
+
+  if(Fat32File[FileHandle].isInUse == 1)
+  {
+    return ERR_NOT_IMPLEMENTED;
+  }else{
+    returncode = ERR_DISABLED;
+  }
+
+  return returncode;
+
+}
