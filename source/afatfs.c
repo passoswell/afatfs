@@ -31,15 +31,18 @@ typedef struct
 
   uint32_t LogicalSize; /*!< File size in bytes of data written to the file. */
 
-  uint32_t PhysicalSize; /*!< Size allocated in bytes, multiple of cluster size*/
+  uint32_t PhysicalSize; /*!< Size allocated in bytes, multiple of
+                              cluster size*/
 
   uint8_t Mode; /*!< A combination of AFATFS_FILE_MODE_* flags */
 
-  uint8_t Attrib; /*!< Combination of FAT_FILE_ATTRIBUTE_* flags for the directory entry of this file */
+  uint8_t Attrib; /*!< Combination of FAT_FILE_ATTRIBUTE_* flags for the
+                       directory entry of this file */
 
   uint8_t Buffer[AFATFS_MAX_SECTOR_SIZE * AFATFS_FILEBUFFER_SIZE];
 
-  uint8_t *pBuffer; /*!< Pointer to the buffer where data should be stored when recovered */
+  uint8_t *pBuffer; /*!< Pointer to the buffer where data should be stored
+                         when recovered */
 
   uint8_t Disk; /*!< Stores the disk from wich the file came */
 
@@ -89,18 +92,18 @@ static EStatus_t AFATFS_ReadBootSector(uint8_t Disk)
         {
           if(i < AFATS_MAX_PARTITIONS)
           {
-          FatDisk[Disk].MBR.FatType[i] =
-              FatDisk[Disk].Buffer[FAT_PARTITION_RECORD0_OFFSET +
-                     (FAT_PARTITION_RECORD_SIZE * i) +
-                     FAT_TYPE_OF_PARTITION_OFFSET];
-          memcpy(&FatDisk[Disk].MBR.StartLBA[i],
-                 &FatDisk[Disk].Buffer[FAT_PARTITION_RECORD0_OFFSET +
-                        (FAT_PARTITION_RECORD_SIZE * i) +
-                        FAT_START_LBA_OFFSET], 4);
-          memcpy(&FatDisk[Disk].MBR.LengthLBA[i],
-                 &FatDisk[Disk].Buffer[FAT_PARTITION_RECORD0_OFFSET +
-                        (FAT_PARTITION_RECORD_SIZE * i) +
-                        FAT_LENGTH_OFFSET], 4);
+            FatDisk[Disk].MBR.FatType[i] =
+                FatDisk[Disk].Buffer[FAT_PARTITION_RECORD0_OFFSET +
+                                     (FAT_PARTITION_RECORD_SIZE * i) +
+                                     FAT_TYPE_OF_PARTITION_OFFSET];
+            memcpy(&FatDisk[Disk].MBR.StartLBA[i],
+                &FatDisk[Disk].Buffer[FAT_PARTITION_RECORD0_OFFSET +
+                                      (FAT_PARTITION_RECORD_SIZE * i) +
+                                      FAT_START_LBA_OFFSET], 4);
+            memcpy(&FatDisk[Disk].MBR.LengthLBA[i],
+                &FatDisk[Disk].Buffer[FAT_PARTITION_RECORD0_OFFSET +
+                                      (FAT_PARTITION_RECORD_SIZE * i) +
+                                      FAT_LENGTH_OFFSET], 4);
           }else{
             break;
           }
@@ -421,9 +424,9 @@ EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
           /*Searching for file name within root entries*/
           for(i = 0; i < 16; i++){
             if(!memcmp(FatDisk[Disk].RootDir[Partition][i].Name,
-                       Fat32File[*FileHandle].Name, 8) &&
-               !memcmp(FatDisk[Disk].RootDir[Partition][i].Ext,
-                       Fat32File[*FileHandle].Extension, 3))
+                Fat32File[*FileHandle].Name, 8) &&
+                !memcmp(FatDisk[Disk].RootDir[Partition][i].Ext,
+                    Fat32File[*FileHandle].Extension, 3))
             {
               break;
             }
@@ -437,8 +440,9 @@ EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
                 FatDisk[Disk].RootDir[Partition][i].Size;
 
             Fat32File[*FileHandle].ClusterFirst =
-                (uint32_t) FatDisk[Disk].RootDir[Partition][i].FirstClusterHi << 16 |
-                FatDisk[Disk].RootDir[Partition][i].FirstClusterLow;
+                (uint32_t) (FatDisk[Disk].RootDir[Partition][i].FirstClusterHi
+                    << 16) |
+                    FatDisk[Disk].RootDir[Partition][i].FirstClusterLow;
             Fat32File[*FileHandle].ClusterPos =
                 Fat32File[*FileHandle].ClusterFirst;
             Fat32File[*FileHandle].ClusterPrev = 0; /*Invalid value*/
@@ -446,7 +450,7 @@ EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
             Fat32File[*FileHandle].SectorFirst =
                 FatDisk[Disk].PPR.DataStartSector[Partition] +
                 ( FatDisk[Disk].PPR.SectorPerCluster[Partition] *
-                (Fat32File[*FileHandle].ClusterFirst - 2) );
+                    (Fat32File[*FileHandle].ClusterFirst - 2) );
             Fat32File[*FileHandle].SectorPos =
                 Fat32File[*FileHandle].SectorFirst;
             Fat32File[*FileHandle].SectorPrev = 0; /*Invalid value*/
@@ -558,32 +562,33 @@ EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size,
       if(nSectors <= AFATFS_FILEBUFFER_SIZE)
       {
 
-      returncode = Disk_List[Disk].Read(Fat32File[FileHandle].Buffer,
-          sectorFirst , nSectors);
-      if(returncode == ANSWERED_REQUEST)
-      {
-        /* Copying requested data to supplied buffer */
-        if((Size + Fat32File[FileHandle].FilePos) <
-            Fat32File[FileHandle].LogicalSize)
+        returncode = Disk_List[Disk].Read(Fat32File[FileHandle].Buffer,
+            sectorFirst , nSectors);
+        if(returncode == ANSWERED_REQUEST)
         {
-          *BytesRead = Size;
-        }
-        else
-        {
-          /* If the size requested is bigger than file size */
-          *BytesRead = Fat32File[FileHandle].LogicalSize -
-              Fat32File[FileHandle].FilePos;
-        }
-        memcpy(Buffer, Fat32File[FileHandle].Buffer + sectorOffset, *BytesRead);
-        /* Updating file cursor position */
-        Fat32File[FileHandle].FilePos += *BytesRead;
-        /* Updating cluster position */
-        Fat32File[FileHandle].ClusterPrev = Fat32File[FileHandle].ClusterPos;
-        /* Updating sector positon */
-        Fat32File[FileHandle].SectorPrev = Fat32File[FileHandle].SectorPos;
-        Fat32File[FileHandle].SectorPos = sectorFirst;
+          /* Copying requested data to supplied buffer */
+          if((Size + Fat32File[FileHandle].FilePos) <
+              Fat32File[FileHandle].LogicalSize)
+          {
+            *BytesRead = Size;
+          }
+          else
+          {
+            /* If the size requested is bigger than file size */
+            *BytesRead = Fat32File[FileHandle].LogicalSize -
+                Fat32File[FileHandle].FilePos;
+          }
+          memcpy(Buffer, Fat32File[FileHandle].Buffer + sectorOffset,
+              *BytesRead);
+          /* Updating file cursor position */
+          Fat32File[FileHandle].FilePos += *BytesRead;
+          /* Updating cluster position */
+          Fat32File[FileHandle].ClusterPrev = Fat32File[FileHandle].ClusterPos;
+          /* Updating sector positon */
+          Fat32File[FileHandle].SectorPrev = Fat32File[FileHandle].SectorPos;
+          Fat32File[FileHandle].SectorPos = sectorFirst;
 
-      }
+        }
 
       }else{
         returncode = ERR_BUFFER_SIZE;
