@@ -529,6 +529,10 @@ EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size,
     if(Size == 0){
       *BytesRead = 0;
       returncode = ANSWERED_REQUEST;
+    }else if( Fat32File[FileHandle].FilePos >=
+        Fat32File[FileHandle].LogicalSize )
+    {
+      returncode = ERR_FAILED;
     }else
     {
       Disk = Fat32File[FileHandle].Disk;
@@ -564,12 +568,15 @@ EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size,
         {
           *BytesRead = Size;
         }
-        else{
+        else
+        {
           /* If the size requested is bigger than file size */
           *BytesRead = Fat32File[FileHandle].LogicalSize -
               Fat32File[FileHandle].FilePos;
         }
         memcpy(Buffer, Fat32File[FileHandle].Buffer + sectorOffset, *BytesRead);
+        /* Updating file cursor position */
+        Fat32File[FileHandle].FilePos += *BytesRead;
         /* Updating cluster position */
         Fat32File[FileHandle].ClusterPrev = Fat32File[FileHandle].ClusterPos;
         /* Updating sector positon */
@@ -577,6 +584,7 @@ EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size,
         Fat32File[FileHandle].SectorPos = sectorFirst;
 
       }
+
       }else{
         returncode = ERR_BUFFER_SIZE;
       }
