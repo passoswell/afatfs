@@ -203,7 +203,7 @@ void AFATFS_Test(void)
   static uint8_t state = DISK_INIT;
   static uint8_t fileHandle;
   static uint8_t Buffer[4100];
-  static uint8_t DataRead;
+  static uint32_t DataRead;
 
   while(1)
   {
@@ -220,12 +220,13 @@ void AFATFS_Test(void)
     case OPEN_FILE:
       returncode = AFATFS_Open(0, 0, "ASCII.TXT", 0, &fileHandle);
       if(returncode == ANSWERED_REQUEST){
+        AFATFS_Seek(0, 5000);
         state = READ_FILE;
       }
       break;
 
     case READ_FILE:
-      returncode = AFATFS_Read(fileHandle, Buffer, 50, &DataRead);
+      returncode = AFATFS_Read(fileHandle, Buffer, 4095, &DataRead);
       if(returncode == ANSWERED_REQUEST){
         state = NOP;
       }
@@ -345,8 +346,9 @@ EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
        * 1 - Find a file structure not in use.
        * 2 - Fetch the file name. Verify if it is 8.3 or less, verify if there
        *     are no subfolders in the name.
-       * 3 - Read root directory entry
-       * 4 - Search for the suplied file name in the root dir entry
+       * 3 - Read root directory entry.
+       * 4 - Search for the suplied file name in the root dir entry.
+       * 5 - Save relevant data from file entry.
        */
       switch(state[Disk]){
       case FETCH_NAME:
@@ -477,41 +479,110 @@ EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
 
 
 
-
-EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint8_t Size,
-    uint8_t *BytesRead)
+EStatus_t AFATFS_Seek(uint8_t FileHandle, uint32_t Offset)
 {
-  enum{FETCH_NAME = 0, NOP, COPY_FILE_TO_BUFFER};
   EStatus_t returncode = OPERATION_RUNNING;
-  static uint8_t state[AFATS_MAX_FILES];
-  uint32_t i;
-  uint32_t nSectors, sector;
+
+  if(Fat32File[FileHandle].isInUse == 1)
+  {
+    if(Offset < Fat32File[FileHandle].LogicalSize)
+    {
+      Fat32File[FileHandle].FilePos = Offset;
+      returncode = ANSWERED_REQUEST;
+    }else
+    {
+      /* Offset is bigger than the file itself */
+      returncode = ERR_PARAM_OFFSET;
+    }
+  }else{
+    returncode = ERR_DISABLED;
+  }
+
+  return returncode;
+}
+
+
+
+EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size,
+    uint32_t *BytesRead)
+{
+  EStatus_t returncode = OPERATION_RUNNING;
+  uint32_t sectorFirst, sectorLast, nSectors, sectorOffset;
   uint8_t Disk;
 
 
   if(Fat32File[FileHandle].isInUse == 1)
   {
-    switch(state[FileHandle])
+    /*
+     * Steps:
+     * 1 - Compute the starting sector and number of sectors where the data is
+     *     based on cursor position on file, sector size, file size.
+     * 2 - Read the data from the memory.
+     * 3 - Copy the data requested tyo the supplied buffer.
+     *
+     * Notes:
+     * 1 - Sector position is updated only after its memory content is read.
+     *
+     * TODO: reduce disk access if the data requested is already buffered, maybe
+     * using SectorPos and SectorPrev values.
+     */
+    if(Size == 0){
+      *BytesRead = 0;
+      returncode = ANSWERED_REQUEST;
+    }else
     {
-    case FETCH_NAME:
       Disk = Fat32File[FileHandle].Disk;
-      nSectors = 1 + (Size / 512);
-      sector = Fat32File[FileHandle].SectorFirst;
+      /* First sector relative to beginning of file */
+      sectorFirst = Fat32File[FileHandle].FilePos / 512;
+      /* Cursor positon within the first sector*/
+      sectorOffset = Fat32File[FileHandle].FilePos - (512 * sectorFirst);
+      /* Last sector relative to beginning of file */
+      if((Size + Fat32File[FileHandle].FilePos) <
+          Fat32File[FileHandle].LogicalSize)
+      {
+        sectorLast = (Fat32File[FileHandle].FilePos + Size) / 512;
+      }else
+      {
+        /* If the size requested is bigger than file size */
+        sectorLast = (Fat32File[FileHandle].LogicalSize) / 512;
+      }
+      /* Computing number of sectors to read */
+      nSectors = 1 + (sectorLast - sectorFirst);
+      /* Transforming relative first sector into absolute value */
+      sectorFirst += Fat32File[FileHandle].SectorFirst;
+
       if(nSectors <= AFATFS_FILEBUFFER_SIZE)
       {
-        returncode = Disk_List[Disk].Read(Fat32File[FileHandle].Buffer,
-            sector , nSectors);
-        if(returncode == ANSWERED_REQUEST){
-          memcpy(Buffer, Fat32File[FileHandle].Buffer, Size);
-          state[FileHandle] = NOP;
-        }
-      }
-      break;
 
-    default:
-      state[FileHandle] = FETCH_NAME;
-      break;
+      returncode = Disk_List[Disk].Read(Fat32File[FileHandle].Buffer,
+          sectorFirst , nSectors);
+      if(returncode == ANSWERED_REQUEST)
+      {
+        /* Copying requested data to supplied buffer */
+        if((Size + Fat32File[FileHandle].FilePos) <
+            Fat32File[FileHandle].LogicalSize)
+        {
+          *BytesRead = Size;
+        }
+        else{
+          /* If the size requested is bigger than file size */
+          *BytesRead = Fat32File[FileHandle].LogicalSize -
+              Fat32File[FileHandle].FilePos;
+        }
+        memcpy(Buffer, Fat32File[FileHandle].Buffer + sectorOffset, *BytesRead);
+        /* Updating cluster position */
+        Fat32File[FileHandle].ClusterPrev = Fat32File[FileHandle].ClusterPos;
+        /* Updating sector positon */
+        Fat32File[FileHandle].SectorPrev = Fat32File[FileHandle].SectorPos;
+        Fat32File[FileHandle].SectorPos = sectorFirst;
+
+      }
+      }else{
+        returncode = ERR_BUFFER_SIZE;
+      }
+
     }
+
   }else{
     returncode = ERR_DISABLED;
   }

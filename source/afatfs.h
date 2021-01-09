@@ -50,7 +50,7 @@
  * @brief Max number of files opened simultaneously per disk.
  */
 #ifndef AFATS_MAX_FILES
-#define AFATS_MAX_FILES                                                        4
+#define AFATS_MAX_FILES                                                        2
 #endif
 
 
@@ -58,7 +58,7 @@
  * @brief Internal file buffer size as a multiple of sector size.
  */
 #ifndef AFATFS_FILEBUFFER_SIZE
-#define AFATFS_FILEBUFFER_SIZE                                                 4
+#define AFATFS_FILEBUFFER_SIZE                                                 8
 #endif
 
 
@@ -97,15 +97,27 @@ EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
 
 
 /**
+ * @brief  This moves a file pointer to the specified offset.
+ * @param  FileHandle : A handle to the file.
+ * @param  Offset : Number in bytes to move the file cursor from the begining of
+ *         the file.
+ * @retval EStatus_t
+ */
+EStatus_t AFATFS_Seek(uint8_t FileHandle, uint32_t Offset);
+
+
+/**
  * @brief  This routine reads data from a file.
  * @param  FileHandle : A handle to the file.
  * @param  Buffer : Buffer where data will be stores.
  * @param  Size : Number of bytes desired.
  * @param  BytesRead : Number of bytes efectively read.
  * @retval EStatus_t
+ * @note   The data is read from an offset set by a call to AFATFS_Write or
+ *         to AFATFS_Seek
  */
-EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint8_t Size,
-    uint8_t *BytesRead);
+EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size,
+    uint32_t *BytesRead);
 
 
 
