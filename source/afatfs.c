@@ -740,11 +740,11 @@ EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size)
       Entry = Fat32File[FileHandle].Entry;
       /* First sector relative to beginning of file */
       sectorFirst = Fat32File[FileHandle].FilePos / 512;
-      /* Cursor positon within the first sector*/
+      /* Cursor positon within the first sector (remainder of division) */
       sectorFOffset = Fat32File[FileHandle].FilePos - (512 * sectorFirst);
       /* Last sector relative to beginning of file */
       sectorLast = (Fat32File[FileHandle].FilePos + Size) / 512;
-      /* Cursor positon within the last sector*/
+      /* Cursor positon within the last sector  (remainder of division) */
       sectorLOffset = (Fat32File[FileHandle].FilePos + Size) -
           (512 * sectorLast);
       /* Computing number of sectors to read */
@@ -774,6 +774,8 @@ EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size)
               state[Disk] = WRITE_DATA;
             }else{
               /* If there is more than one sector to write */
+              /* (512 - sectorFOffset) is the qty of new data writen to the
+               * 1st sector in this case*/
               memcpy(Fat32File[FileHandle].Buffer + sectorFOffset, Buffer,
                   512 - sectorFOffset);
               state[Disk] = READ_LAST_SECTOR;
@@ -790,6 +792,8 @@ EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size)
             returncode = OPERATION_RUNNING;
             /* 4 - Updating file buffer with the new data supplyed */
             /* Updating the remaining file sectors with new data */
+            /* (512 - sectorFOffset) is the qty of new data writen to the
+             * 1st sector in this case*/
             memcpy(Fat32File[FileHandle].Buffer + 512,
                 Buffer + (512 - sectorFOffset), Size - (512 - sectorFOffset));
             state[Disk] = WRITE_DATA;
