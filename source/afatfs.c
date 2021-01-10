@@ -206,6 +206,35 @@ static EStatus_t AFATFS_ReadRootDirEntry(uint8_t Disk, uint8_t Partition)
 
 
 
+static EStatus_t AFATFS_WriteRootDirEntry(uint8_t Disk, uint8_t Partition)
+{
+  EStatus_t returncode = OPERATION_RUNNING;
+
+  if(Disk < AFATS_MAX_DISKS && Partition < AFATS_MAX_PARTITIONS)
+  {
+
+    if(FatDisk[Disk].MBR.FatType[Partition] == FAT32_LBA)
+    {
+
+      memcpy(FatDisk[Disk].Buffer, &FatDisk[Disk].RootDir[Partition][0],
+          sizeof(FatDisk[Disk].RootDir[0]));
+
+      returncode = Disk_List[Disk].Write(FatDisk[Disk].Buffer,
+          FatDisk[Disk].PPR.RootSector[Partition], 1);
+
+    }else{
+      returncode = ERR_INVALID_FILE_SYSTEM;
+    }
+
+  }else{
+    returncode = ERR_PARAM_VALUE;
+  }
+
+  return returncode;
+}
+
+
+
 void AFATFS_Test(void)
 {
   enum{DISK_INIT = 0, OPEN_FILE, READ_FILE, NOP };
@@ -475,6 +504,9 @@ EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
             Fat32File[*FileHandle].FilePos = 0; /*Start of file*/
             Fat32File[*FileHandle].LogicalSize =
                 FatDisk[Disk].RootDir[Partition][i].Size;
+            /* Considering a file is only one cluster in size */
+            Fat32File[*FileHandle].PhysicalSize =
+                512 * FatDisk[Disk].PPR.SectorPerCluster[Partition];
 
             Fat32File[*FileHandle].ClusterFirst =
                 (uint32_t) (FatDisk[Disk].RootDir[Partition][i].FirstClusterHi
@@ -644,26 +676,115 @@ EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size,
 
 EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size)
 {
+  enum{READ_FIRST_SECTOR = 0, READ_LAST_SECTOR, WRITE_DATA, UPDATE_ENTRY};
+  static uint8_t state[AFATS_MAX_DISKS];
   EStatus_t returncode = OPERATION_RUNNING;
-  uint32_t sectorFirst, sectorLast, nSectors, sectorOffset;
+  uint32_t sectorFirst, sectorLast, nSectors, sectorFOffset, sectorLOffset;
   uint8_t Disk;
-
 
   if(Fat32File[FileHandle].isInUse == 1)
   {
     /*
      * Steps:
      * 1 - Read first sector from the disk
-     * 2 - Copy data to the file buffer in the correct position
+     * 2 - Copy data in the correct position of file buffer
      * 3 - Read last sector from the disk
-     * 4 - Update buffer with data from last sector
-     * 3 - Write data back to the disk
-     * 4 - Update root entry list with new file size
+     * 4 - Update file buffer with the new data supplyed
+     * 5 - Write data back to the disk
+     * 6 - Update root entry list with new file size
      *
      * Notes:
      * 1 - Sector position is updated only after its memory content is written
      *     and the root entry list is updated.
+     * 2 - There are three cases:
+     *     a - There is only one sector to write
+     *     b - There are two or more sectors to write
      */
+    if(Size == 0){
+      returncode = ANSWERED_REQUEST;
+    }else if( Fat32File[FileHandle].FilePos >=
+        Fat32File[FileHandle].PhysicalSize )
+    {
+      returncode = ERR_FAILED;
+    }else if( Fat32File[FileHandle].FilePos + Size >=
+        Fat32File[FileHandle].PhysicalSize ){
+      returncode = ERR_FAILED;
+    }else
+    {
+      Disk = Fat32File[FileHandle].Disk;
+      /* First sector relative to beginning of file */
+      sectorFirst = Fat32File[FileHandle].FilePos / 512;
+      /* Cursor positon within the first sector*/
+      sectorFOffset = Fat32File[FileHandle].FilePos - (512 * sectorFirst);
+      /* Last sector relative to beginning of file */
+      sectorLast = (Fat32File[FileHandle].FilePos + Size) / 512;
+      /* Cursor positon within the last sector*/
+      sectorLOffset = (Fat32File[FileHandle].FilePos + Size) -
+          (512 * sectorLast);
+      /* Computing number of sectors to read */
+      nSectors = 1 + (sectorLast - sectorFirst);
+      /* Transforming relative first sector into absolute value */
+      sectorFirst += Fat32File[FileHandle].SectorFirst;
+      sectorLast  += Fat32File[FileHandle].SectorFirst;
+
+
+
+      switch(state[Disk])
+      {
+      case READ_FIRST_SECTOR:
+        /* 1 - Reading first sector from the disk */
+        returncode = Disk_List[Disk].Read(Fat32File[FileHandle].Buffer,
+            sectorFirst , 1);
+        if(returncode == ANSWERED_REQUEST)
+        {
+          returncode = OPERATION_RUNNING;
+          /* 2 - Copying data in the correct position of file buffer */
+          /* Updating the first file sector with new data */
+          if(nSectors == 1){
+            /* If there is only one sector to write */
+            memcpy(Fat32File[FileHandle].Buffer + sectorFOffset, Buffer,
+                sectorLOffset - sectorFOffset);
+            state[Disk] = WRITE_DATA;
+          }else{
+            /* If there is more than one sector to write */
+          memcpy(Fat32File[FileHandle].Buffer + sectorFOffset, Buffer,
+              512 - sectorFOffset);
+          state[Disk] = READ_LAST_SECTOR;
+          }
+        }
+        break;
+
+      case READ_LAST_SECTOR:
+        /* 3 - Reading last sector from the disk */
+        returncode = Disk_List[Disk].Read(Fat32File[FileHandle].Buffer +
+            ((nSectors - 1) * 512) , sectorLast , 1);
+        if(returncode == ANSWERED_REQUEST)
+        {
+          returncode = OPERATION_RUNNING;
+          /* 4 - Updating file buffer with the new data supplyed */
+          /* Updating the remaining file sectors with new data */
+          memcpy(Fat32File[FileHandle].Buffer + 512, Buffer + 512,
+              Size - (512 - sectorFOffset));
+          state[Disk] = WRITE_DATA;
+        }
+        else if(returncode >= RETURN_ERROR_VALUE)
+        {
+          state[Disk] = READ_FIRST_SECTOR;
+        }
+          break;
+
+      case WRITE_DATA:
+        /* 5 - Writing data back to the disk */
+        break;
+
+      default:
+        state[Disk] = READ_FIRST_SECTOR;
+        break;
+      }
+
+
+    }
+
   }else{
     returncode = ERR_DISABLED;
   }
