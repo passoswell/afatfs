@@ -74,7 +74,7 @@ afatfsFile_t Fat32File[AFATS_MAX_FILES];
 static EStatus_t AFATFS_ReadBootSector(uint8_t Disk)
 {
   EStatus_t returncode = OPERATION_RUNNING;
-  uint32_t i;
+  uint32_t i, counter;
 
   if(Disk < AFATS_MAX_DISKS)
   {
@@ -87,6 +87,7 @@ static EStatus_t AFATFS_ReadBootSector(uint8_t Disk)
       /* Verifying the FAT boot sector signature */
       if(FatDisk[Disk].MBR.Signature == FAT_BOOT_SIGNATURE)
       {
+        counter = 0;
         /* Saving the FAT type, the partition's start sector and length */
         for(i = 0; i < FAT_PARTITION_QTY; i++)
         {
@@ -104,9 +105,15 @@ static EStatus_t AFATFS_ReadBootSector(uint8_t Disk)
                 &FatDisk[Disk].Buffer[FAT_PARTITION_RECORD0_OFFSET +
                                       (FAT_PARTITION_RECORD_SIZE * i) +
                                       FAT_LENGTH_OFFSET], 4);
+            if(FatDisk[Disk].MBR.FatType[i] == FAT32_LBA){
+              counter++;
+            }
           }else{
             break;
           }
+        }
+        if(counter == 0){
+          returncode = ERR_INVALID_FILE_SYSTEM;
         }
       }else{
         /* Failed to find a FAT file system */
@@ -156,7 +163,7 @@ static EStatus_t AFATFS_ReadBiosParameter(uint8_t Disk, uint8_t Partition)
       }
 
     }else{
-      returncode = ERR_FAILED;
+      returncode = ERR_INVALID_FILE_SYSTEM;
     }
 
   }else{
@@ -187,7 +194,7 @@ static EStatus_t AFATFS_ReadRootDirEntry(uint8_t Disk, uint8_t Partition)
       }
 
     }else{
-      returncode = ERR_FAILED;
+      returncode = ERR_INVALID_FILE_SYSTEM;
     }
 
   }else{
@@ -255,6 +262,8 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
   enum{INT_HW_INIT = 0, EXT_DEV_CONFIG, READ_BOOT, READ_BIOS, NOP};
   EStatus_t returncode = OPERATION_RUNNING;
   static uint8_t state[AFATS_MAX_DISKS];
+  static uint8_t partCounter[AFATS_MAX_DISKS];
+  static uint8_t errorCounter[AFATS_MAX_DISKS];
 
   if(Disk < AFATS_MAX_DISKS && Disk < DIsk_ListSize)
   {
@@ -286,7 +295,7 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
 
       case READ_BOOT:
         /* Reading boot sector (sector 0) */
-        returncode = AFATFS_ReadBootSector(0);
+        returncode = AFATFS_ReadBootSector(Disk);
         if(returncode == ANSWERED_REQUEST){
           returncode = OPERATION_RUNNING;
           state[Disk] = READ_BIOS;
@@ -297,11 +306,39 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
 
       case READ_BIOS:
         /* Reading what seems to be an extension of the boot sector */
-        returncode = AFATFS_ReadBiosParameter(0, 0);
+        returncode = AFATFS_ReadBiosParameter(Disk, partCounter[Disk]);
         if(returncode == ANSWERED_REQUEST){
-          FatDisk[Disk].isInitialized = 1;
-          state[Disk] = NOP;
-        }else if(returncode >= RETURN_ERROR_VALUE){
+          partCounter[Disk]++;
+          if(partCounter[Disk] >= AFATS_MAX_PARTITIONS){
+            /* All partitions were read, and at least one is valid */
+            partCounter[Disk] = 0;
+            errorCounter[Disk] = 0;
+            partCounter[Disk] = 0;
+            FatDisk[Disk].isInitialized = 1;
+            state[Disk] = NOP;
+          }else{
+            returncode = OPERATION_RUNNING;
+          }
+        }else if(returncode == ERR_INVALID_FILE_SYSTEM){
+          errorCounter[Disk]++;
+          partCounter[Disk]++;
+          if(partCounter[Disk] >= AFATS_MAX_PARTITIONS){
+            partCounter[Disk] = 0;
+            if(errorCounter[Disk] < AFATS_MAX_PARTITIONS){
+              /* At least one valid partition was found */
+              FatDisk[Disk].isInitialized = 1;
+              state[Disk] = NOP;
+              returncode = ANSWERED_REQUEST;
+            }else{
+              /* No valid partition was found */
+              state[Disk] = EXT_DEV_CONFIG;
+            }
+            errorCounter[Disk] = 0;
+            partCounter[Disk] = 0;
+          }else{
+            returncode = OPERATION_RUNNING;
+          }
+        } else if(returncode >= RETURN_ERROR_VALUE){
           state[Disk] = EXT_DEV_CONFIG;
         }
         break;
@@ -419,7 +456,7 @@ EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
         break;
 
       case READ_ROOT_DIR:
-        returncode = AFATFS_ReadRootDirEntry(0, 0);
+        returncode = AFATFS_ReadRootDirEntry(Disk, Partition);
         if(returncode == ANSWERED_REQUEST){
           /*Searching for file name within root entries*/
           for(i = 0; i < 16; i++){
@@ -614,7 +651,19 @@ EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size)
 
   if(Fat32File[FileHandle].isInUse == 1)
   {
-    return ERR_NOT_IMPLEMENTED;
+    /*
+     * Steps:
+     * 1 - Read first sector from the disk
+     * 2 - Copy data to the file buffer in the correct position
+     * 3 - Read last sector from the disk
+     * 4 - Update buffer with data from last sector
+     * 3 - Write data back to the disk
+     * 4 - Update root entry list with new file size
+     *
+     * Notes:
+     * 1 - Sector position is updated only after its memory content is written
+     *     and the root entry list is updated.
+     */
   }else{
     returncode = ERR_DISABLED;
   }
