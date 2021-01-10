@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdio.h>
 #include "afatfs.h"
 #include "disk.h"
 #include "afatfs_types.h"
@@ -47,6 +48,8 @@ typedef struct
   uint8_t Disk; /*!< Stores the disk from wich the file came */
 
   uint8_t Partition; /*!< Stores te partition from which the file came */
+
+  uint32_t Entry; /*!< Entry position on root dir table */
 
   uint8_t isInUse; /*!< Flags if the structure represents a valid file */
 
@@ -237,12 +240,13 @@ static EStatus_t AFATFS_WriteRootDirEntry(uint8_t Disk, uint8_t Partition)
 
 void AFATFS_Test(void)
 {
-  enum{DISK_INIT = 0, OPEN_FILE, READ_FILE, NOP };
+  enum{DISK_INIT = 0, OPEN_FILE, READ_FILE, WRITE_FILE, READ_FILE_2, NOP };
   EStatus_t returncode;
   static uint8_t state = DISK_INIT;
   static uint8_t fileHandle;
   static uint8_t Buffer[4100];
   static uint32_t DataRead;
+  static uint16_t counter = 0;
 
   while(1)
   {
@@ -266,6 +270,26 @@ void AFATFS_Test(void)
 
     case READ_FILE:
       returncode = AFATFS_Read(fileHandle, Buffer, 4095, &DataRead);
+      if(returncode == ANSWERED_REQUEST){
+        AFATFS_Seek(0, 510);
+        state = WRITE_FILE;
+      }
+      break;
+
+    case WRITE_FILE:
+      sprintf((char *)Buffer, "%5d\r\n", counter);
+      returncode = AFATFS_Write(fileHandle, Buffer, 7);
+      if(returncode == ANSWERED_REQUEST){
+        counter++;
+        if(counter > 10){
+          AFATFS_Seek(0, 510);
+          state = READ_FILE_2;
+        }
+      }
+      break;
+
+    case READ_FILE_2:
+      returncode = AFATFS_Read(fileHandle, Buffer, 512, &DataRead);
       if(returncode == ANSWERED_REQUEST){
         state = NOP;
       }
@@ -501,6 +525,7 @@ EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
             /* File was found */
             Fat32File[*FileHandle].Disk = Disk;
             Fat32File[*FileHandle].Partition = Partition;
+            Fat32File[*FileHandle].Entry = i;
             Fat32File[*FileHandle].FilePos = 0; /*Start of file*/
             Fat32File[*FileHandle].LogicalSize =
                 FatDisk[Disk].RootDir[Partition][i].Size;
@@ -533,6 +558,8 @@ EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
             returncode = ERR_FAILED;
             state[Disk] = FETCH_NAME;
           }
+        }else if(returncode >= RETURN_ERROR_VALUE){
+          state[Disk] = FETCH_NAME;
         }
         break;
 
@@ -680,7 +707,8 @@ EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size)
   static uint8_t state[AFATS_MAX_DISKS];
   EStatus_t returncode = OPERATION_RUNNING;
   uint32_t sectorFirst, sectorLast, nSectors, sectorFOffset, sectorLOffset;
-  uint8_t Disk;
+  uint8_t Disk, Partition;
+  uint32_t Entry;
 
   if(Fat32File[FileHandle].isInUse == 1)
   {
@@ -702,16 +730,14 @@ EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size)
      */
     if(Size == 0){
       returncode = ANSWERED_REQUEST;
-    }else if( Fat32File[FileHandle].FilePos >=
-        Fat32File[FileHandle].PhysicalSize )
-    {
-      returncode = ERR_FAILED;
     }else if( Fat32File[FileHandle].FilePos + Size >=
         Fat32File[FileHandle].PhysicalSize ){
       returncode = ERR_FAILED;
     }else
     {
       Disk = Fat32File[FileHandle].Disk;
+      Partition = Fat32File[FileHandle].Partition;
+      Entry = Fat32File[FileHandle].Entry;
       /* First sector relative to beginning of file */
       sectorFirst = Fat32File[FileHandle].FilePos / 512;
       /* Cursor positon within the first sector*/
@@ -727,61 +753,104 @@ EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size)
       sectorFirst += Fat32File[FileHandle].SectorFirst;
       sectorLast  += Fat32File[FileHandle].SectorFirst;
 
-
-
-      switch(state[Disk])
+      if(nSectors <= AFATFS_FILEBUFFER_SIZE)
       {
-      case READ_FIRST_SECTOR:
-        /* 1 - Reading first sector from the disk */
-        returncode = Disk_List[Disk].Read(Fat32File[FileHandle].Buffer,
-            sectorFirst , 1);
-        if(returncode == ANSWERED_REQUEST)
-        {
-          returncode = OPERATION_RUNNING;
-          /* 2 - Copying data in the correct position of file buffer */
-          /* Updating the first file sector with new data */
-          if(nSectors == 1){
-            /* If there is only one sector to write */
-            memcpy(Fat32File[FileHandle].Buffer + sectorFOffset, Buffer,
-                sectorLOffset - sectorFOffset);
-            state[Disk] = WRITE_DATA;
-          }else{
-            /* If there is more than one sector to write */
-          memcpy(Fat32File[FileHandle].Buffer + sectorFOffset, Buffer,
-              512 - sectorFOffset);
-          state[Disk] = READ_LAST_SECTOR;
-          }
-        }
-        break;
 
-      case READ_LAST_SECTOR:
-        /* 3 - Reading last sector from the disk */
-        returncode = Disk_List[Disk].Read(Fat32File[FileHandle].Buffer +
-            ((nSectors - 1) * 512) , sectorLast , 1);
-        if(returncode == ANSWERED_REQUEST)
+        switch(state[Disk])
         {
-          returncode = OPERATION_RUNNING;
-          /* 4 - Updating file buffer with the new data supplyed */
-          /* Updating the remaining file sectors with new data */
-          memcpy(Fat32File[FileHandle].Buffer + 512, Buffer + 512,
-              Size - (512 - sectorFOffset));
-          state[Disk] = WRITE_DATA;
-        }
-        else if(returncode >= RETURN_ERROR_VALUE)
-        {
-          state[Disk] = READ_FIRST_SECTOR;
-        }
+        case READ_FIRST_SECTOR:
+          /* 1 - Reading first sector from the disk */
+          returncode = Disk_List[Disk].Read(Fat32File[FileHandle].Buffer,
+              sectorFirst , 1);
+          if(returncode == ANSWERED_REQUEST)
+          {
+            returncode = OPERATION_RUNNING;
+            /* 2 - Copying data in the correct position of file buffer */
+            /* Updating the first file sector with new data */
+            if(nSectors == 1){
+              /* If there is only one sector to write */
+              memcpy(Fat32File[FileHandle].Buffer + sectorFOffset, Buffer,
+                  sectorLOffset - sectorFOffset);
+              state[Disk] = WRITE_DATA;
+            }else{
+              /* If there is more than one sector to write */
+              memcpy(Fat32File[FileHandle].Buffer + sectorFOffset, Buffer,
+                  512 - sectorFOffset);
+              state[Disk] = READ_LAST_SECTOR;
+            }
+          }
           break;
 
-      case WRITE_DATA:
-        /* 5 - Writing data back to the disk */
-        break;
+        case READ_LAST_SECTOR:
+          /* 3 - Reading last sector from the disk */
+          returncode = Disk_List[Disk].Read(Fat32File[FileHandle].Buffer +
+              ((nSectors - 1) * 512) , sectorLast , 1);
+          if(returncode == ANSWERED_REQUEST)
+          {
+            returncode = OPERATION_RUNNING;
+            /* 4 - Updating file buffer with the new data supplyed */
+            /* Updating the remaining file sectors with new data */
+            memcpy(Fat32File[FileHandle].Buffer + 512,
+                Buffer + (512 - sectorFOffset), Size - (512 - sectorFOffset));
+            state[Disk] = WRITE_DATA;
+          }
+          else if(returncode >= RETURN_ERROR_VALUE)
+          {
+            state[Disk] = READ_FIRST_SECTOR;
+          }
+          break;
 
-      default:
-        state[Disk] = READ_FIRST_SECTOR;
-        break;
+        case WRITE_DATA:
+          /* 5 - Writing data back to the disk */
+          returncode = Disk_List[Disk].Write(Fat32File[FileHandle].Buffer,
+              sectorFirst, nSectors);
+          if(returncode == ANSWERED_REQUEST)
+          {
+            /* Computing if file size increased */
+            if((Fat32File[FileHandle].FilePos + Size) >
+            Fat32File[FileHandle].LogicalSize)
+            {
+              returncode = OPERATION_RUNNING;
+              FatDisk[Disk].RootDir[Partition][Entry].Size =
+                  Fat32File[FileHandle].FilePos + Size;
+              state[Disk] = UPDATE_ENTRY;
+            }
+            else
+            {
+              Fat32File[FileHandle].FilePos += Size;
+              state[Disk] = READ_FIRST_SECTOR;
+            }
+          }else if(returncode >= RETURN_ERROR_VALUE){
+            state[Disk] = READ_FIRST_SECTOR;
+          }
+          break;
+
+        case UPDATE_ENTRY:
+          returncode = AFATFS_WriteRootDirEntry(Disk, Partition);
+          if(returncode == ANSWERED_REQUEST){
+            Fat32File[FileHandle].FilePos += Size;
+            Fat32File[FileHandle].LogicalSize = Fat32File[FileHandle].FilePos;
+            state[Disk] = READ_FIRST_SECTOR;
+          }else if(returncode >= RETURN_ERROR_VALUE){
+            state[Disk] = READ_FIRST_SECTOR;
+          }
+          break;
+
+        default:
+          state[Disk] = READ_FIRST_SECTOR;
+          break;
+        }
+
+
       }
 
+      if(returncode == ANSWERED_REQUEST){
+        /* Updating cluster position */
+        Fat32File[FileHandle].ClusterPrev = Fat32File[FileHandle].ClusterPos;
+        /* Updating sector positon */
+        Fat32File[FileHandle].SectorPrev = Fat32File[FileHandle].SectorPos;
+        Fat32File[FileHandle].SectorPos = sectorFirst;
+      }
 
     }
 
