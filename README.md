@@ -4,7 +4,7 @@
 ## Table of contents
 * [General info](#general-info)
 * [Screenshots](#screenshots)
-* [Technologies](#technologies)
+* [Dependencies](#dependencies)
 * [Setup](#setup)
 * [Features](#features)
 * [Status](#status)
@@ -17,10 +17,8 @@ This is a library that allows for reading and writing to disks formated as FAT32
 ## Screenshots
 No screenshots available.
 
-## Technologies
-* Tech 1 - version 1.0
-* Tech 2 - version 2.0
-* Tech 3 - version 3.0
+## Dependencies
+* Error codes returned by afatfs functions are declared inside "std_headers/stdstatus.h" file on the [utils repository](https://github.com/passoswell/utils).
 
 ## Setup
 ### 1. Edit "map_afatfs.h" file to add your disks.

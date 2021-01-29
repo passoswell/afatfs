@@ -1,7 +1,6 @@
 #include <string.h>
 #include <stdio.h>
 #include "afatfs.h"
-#include "disk.h"
 #include "afatfs_types.h"
 #include "map_afatfs.h"
 
