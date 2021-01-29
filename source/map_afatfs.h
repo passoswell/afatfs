@@ -42,7 +42,7 @@ typedef struct
 
 
 extern DiskIO_t Disk_List[];
-extern uint32_t DIsk_ListSize;
+extern uint32_t Disk_ListSize;
 
 
 

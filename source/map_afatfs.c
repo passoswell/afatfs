@@ -6,4 +6,4 @@ DiskIO_t Disk_List[] = {
     {SDCARD_IntHwInit, SDCARD_ExtHwConfig, SDCARD_Read, SDCARD_Write, 0},
 };
 
-uint32_t DIsk_ListSize = sizeof(Disk_List) / sizeof(DiskIO_t);
+uint32_t Disk_ListSize = sizeof(Disk_List) / sizeof(DiskIO_t);

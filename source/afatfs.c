@@ -238,77 +238,6 @@ static EStatus_t AFATFS_WriteRootDirEntry(uint8_t Disk, uint8_t Partition)
 
 
 
-void AFATFS_Test(void)
-{
-  enum{DISK_INIT = 0, OPEN_FILE, READ_FILE, WRITE_FILE, READ_FILE_2, NOP };
-  EStatus_t returncode;
-  static uint8_t state = DISK_INIT;
-  static uint8_t fileHandle;
-  static uint8_t Buffer[4100];
-  static uint32_t DataRead;
-  static uint16_t counter = 0;
-
-  while(1)
-  {
-
-    switch(state)
-    {
-    case DISK_INIT:
-      returncode = AFATFS_Mount(0);
-      if(returncode == ANSWERED_REQUEST){
-        state = OPEN_FILE;
-      }
-      break;
-
-    case OPEN_FILE:
-      returncode = AFATFS_Open(0, 0, "ASCII.TXT", 0, &fileHandle);
-      if(returncode == ANSWERED_REQUEST){
-        AFATFS_Seek(0, 5000);
-        state = READ_FILE;
-      }
-      break;
-
-    case READ_FILE:
-      returncode = AFATFS_Read(fileHandle, Buffer, 4095, &DataRead);
-      if(returncode == ANSWERED_REQUEST){
-        AFATFS_Seek(0, 510);
-        state = WRITE_FILE;
-      }
-      break;
-
-    case WRITE_FILE:
-      sprintf((char *)Buffer, "%5d\r\n", counter);
-      returncode = AFATFS_Write(fileHandle, Buffer, 7);
-      if(returncode == ANSWERED_REQUEST){
-        counter++;
-        if(counter > 10){
-          AFATFS_Seek(0, 510);
-          state = READ_FILE_2;
-        }
-      }
-      break;
-
-    case READ_FILE_2:
-      returncode = AFATFS_Read(fileHandle, Buffer, 512, &DataRead);
-      if(returncode == ANSWERED_REQUEST){
-        state = NOP;
-      }
-      break;
-
-    case NOP:
-      break;
-
-    default:
-      state = DISK_INIT;
-      break;
-    }
-
-  }
-
-}
-
-
-
 
 EStatus_t AFATFS_Mount(uint8_t Disk)
 {
@@ -318,7 +247,7 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
   static uint8_t partCounter[AFATS_MAX_DISKS];
   static uint8_t errorCounter[AFATS_MAX_DISKS];
 
-  if(Disk < AFATS_MAX_DISKS && Disk < DIsk_ListSize)
+  if(Disk < AFATS_MAX_DISKS && Disk < Disk_ListSize)
   {
     if(Disk_List[Disk].IntHwInit != NULL &&
         Disk_List[Disk].ExtDevConfig != NULL &&
@@ -430,7 +359,7 @@ EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
   char *p;
   uint32_t nameSize, extensionSize;
 
-  if(Disk < AFATS_MAX_DISKS && Disk < DIsk_ListSize)
+  if(Disk < AFATS_MAX_DISKS && Disk < Disk_ListSize)
   {
     if(FatDisk[Disk].isInitialized == 1)
     {

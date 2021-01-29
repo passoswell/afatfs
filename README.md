@@ -43,7 +43,7 @@ typedef enum
 
 Inside "map_afatfs.c", you must include the header files for the disks and fill "Disk_List" variable with pointers to the disks' functions. The functions that must be supplied are:
  - xxxx_IntHwInit, a funtion that configures the hardware that is internal to the microcontroller (eg. I2C, SPI, UART, GPIO)
- ```
+```
 /**
  * @brief  Initializes internal peripherals.
  * @retval EStatus_t
@@ -55,7 +55,7 @@ EStatus_t SDCARD_IntHwInit( void );
 ```
 
  - xxxx_ExtDevConfig, a function that comunicates with the disk to perform any kind of configuration required
- ```
+```
 /**
  * @brief  Initializes external peripheral.
  * @retval EStatus_t
@@ -63,9 +63,9 @@ EStatus_t SDCARD_IntHwInit( void );
  *       for full device usage; the SDCARD_IntHwInit must be called first.
  */
 EStatus_t SDCARD_ExtHwConfig( void );
- ```
+```
  - xxxx_Read, a funcion that reads sectors from the disk
- ```
+```
 /**
  * @brief  This routine reads data from memory.
  * @param  DataBuffer : Variable where data read will be stored.
@@ -75,9 +75,9 @@ EStatus_t SDCARD_ExtHwConfig( void );
  */
 EStatus_t SDCARD_Read(uint8_t *DataBuffer, uint32_t Sector,
     uint32_t NumberOfSectors);
- ```
+```
  - xxxx_Write, a funcion that writes data to sectors on the disk
- ```
+```
 /**
  * @brief  This routine writes data to memory.
  * @param  DataBuffer : Variable where data to write is stored.
@@ -87,13 +87,13 @@ EStatus_t SDCARD_Read(uint8_t *DataBuffer, uint32_t Sector,
  */
 EStatus_t SDCARD_Write(uint8_t *DataBuffer, uint32_t Sector,
     uint32_t NumberOfSectors);
- ```
+```
  - xxxx_ReadSpecs, a funcion that fills a structure with disk specs (not implemented, for future purposes only)
- ```
- ```
+```
+```
  
  The variable should, for the three disks on the example, look similar to the code below.
- ```
+```
 #include "map_afatfs.h"
 #include "disk1.h"
 #include "disk2.h"
@@ -107,11 +107,11 @@ DiskIO_t Disk_List[] = {
 
 uint32_t DIsk_ListSize = sizeof(Disk_List) / sizeof(DiskIO_t);
 
- ```
+```
 
 ## Code Examples
 
- ```
+```
 #include "afatfs.h"
 
 void main(void)
@@ -198,7 +198,7 @@ void main(void)
   }
 
 }
- ```
+```
 
 
 ## Features and limitations

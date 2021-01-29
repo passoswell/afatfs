@@ -69,12 +69,6 @@
 
 
 /**
- * @brief Test function.
- */
-void AFATFS_Test(void);
-
-
-/**
  * @brief  This routine configures a specified disk.
  * @param  Disk : A number that will identify the disk.
  * @param  DiskIO : Pointers to functions that give access to the disk.
