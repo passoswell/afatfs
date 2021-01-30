@@ -168,6 +168,7 @@ typedef struct
 {
   uint32_t FatStartSector[AFATS_MAX_PARTITIONS];
   uint32_t FatSize[AFATS_MAX_PARTITIONS];
+  uint8_t  FatCopies[AFATS_MAX_PARTITIONS];
   uint32_t DataStartSector[AFATS_MAX_PARTITIONS];
   uint32_t SectorPerCluster[AFATS_MAX_PARTITIONS];
   uint32_t RootSector[AFATS_MAX_PARTITIONS];

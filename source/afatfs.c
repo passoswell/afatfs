@@ -159,6 +159,7 @@ static EStatus_t AFATFS_ReadBiosParameter(uint8_t Disk, uint8_t Partition)
         /* The next two are important to determine file sectors */
         FatDisk[Disk].PPR.FatStartSector[Partition] = fatStart;
         FatDisk[Disk].PPR.FatSize[Partition] = fatSize;
+        FatDisk[Disk].PPR.FatCopies[Partition] = Parameters.fatCopies;
         FatDisk[Disk].PPR.DataStartSector[Partition] = dataStart;
         FatDisk[Disk].PPR.SectorPerCluster[Partition] =
             Parameters.sectorsPerCluster;
@@ -262,8 +263,67 @@ static EStatus_t AFATFS_WriteRootDirEntry(uint8_t Disk, uint8_t Partition,
 }
 
 
+static EStatus_t AFATFS_FindEmptyCluster(uint8_t Disk, uint8_t Partition,
+    uint8_t FatNum, uint32_t *EntryNumber)
+{
+  EStatus_t returncode = OPERATION_RUNNING;
+  static uint32_t sector[AFATS_MAX_DISKS];
+  uint32_t i;
 
-EStatus_t AFATFS_FindFile(uint8_t Disk, uint8_t Partition, uint8_t FileHandle)
+  if(Disk < AFATS_MAX_DISKS && Partition < AFATS_MAX_PARTITIONS &&
+      FatDisk[Disk].MBR.FatType[Partition] == FAT32_LBA &&
+      EntryNumber != NULL)
+  {
+
+    returncode = Disk_List[Disk].Read(FatDisk[Disk].Buffer,
+        FatDisk[Disk].PPR.FatStartSector[Partition] + sector[Disk], 1);
+    if(returncode == ANSWERED_REQUEST)
+    {
+      *EntryNumber = 0; /* Invalid value */
+      /* Skipping first 2 integers, root dir and the next cluster */
+      if(sector[Disk] == 0){ i = 4;}
+      else{ i = 0;}
+      for(; i < 128; i++){
+        if(FatDisk[Disk].Buffer[4*i] == 0 &&
+            FatDisk[Disk].Buffer[4*i + 1] == 0 &&
+            FatDisk[Disk].Buffer[4*i + 2] == 0 &&
+            FatDisk[Disk].Buffer[4*i + 3] == 0)
+        {
+          /* Found empty cluster */
+          *EntryNumber = (128 * sector[Disk]) + i;
+          sector[Disk] = 0;
+          break;
+        }
+      }
+      if(*EntryNumber == 0){
+        sector[Disk]++;
+        if(sector[Disk] >= FatDisk[Disk].PPR.FatSize[Partition]){
+          sector[Disk] = 0;
+          returncode = ERR_FAILED;
+        }else{
+          returncode = OPERATION_RUNNING;
+        }
+      }
+    }
+
+  }else{
+    if(FatDisk[Disk].MBR.FatType[Partition] != FAT32_LBA){
+      returncode = ERR_PARAM_VALUE;
+    }else if(EntryNumber == NULL){
+      returncode = ERR_NULL_POINTER;
+    }else{
+      returncode = ERR_INVALID_FILE_SYSTEM;
+    }
+    sector[Disk] = 0;
+  }
+
+  return returncode;
+}
+
+
+
+static EStatus_t AFATFS_FindFile(uint8_t Disk, uint8_t Partition,
+    uint8_t FileHandle)
 {
   EStatus_t returncode = OPERATION_RUNNING;
   uint32_t sectorOffset;
@@ -469,14 +529,83 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
 EStatus_t AFATFS_Create(uint8_t Disk, uint8_t Partition, char *FileName,
     uint8_t Mode, uint8_t *FileHandle)
 {
+  enum{FIND_FILE = 0, FIND_EMPTY_CLUSTER, FIND_EMPTY_ROOT_ENTRY,
+    ALOCATE_CLUSTER, WRITE_ROOT_ENTRY};
   EStatus_t returncode = OPERATION_RUNNING;
+  static uint8_t state[AFATS_MAX_DISKS];
+  static uint32_t entryNumber[AFATS_MAX_DISKS];
 
   if(Disk < AFATS_MAX_DISKS && Disk < Disk_ListSize &&
       FileName != NULL && FileHandle != NULL &&
       FatDisk[Disk].isInitialized == 1)
   {
+    /*
+     * Steps:
+     * 1 - Verify if the file already exists. If yes, returns failure
+     * 2 - Find a empty cluster on the FAT (File Allocation Table)
+     *     Clust is free if 0x00000000 is written
+     * 3 - Write 0xFFFFFFFF on the space for the empty cluster (means it is the
+     *     last cluster for the file)
+     * 4 - Find a free entry on ROOT_DIR (FAT_END_OF_DIR or FAT_UNUSED_ENTRY)
+     * 5 - Write file entry on ROOT_DIR
+     *
+     *
+     * Notes:
+     * 1 - Not sure if it is best to write the rootfirst, then the FAT, or the
+     *     opposite.
+     */
+    switch(state[Disk])
+    {
+    case FIND_FILE:
+      returncode = AFATFS_Open(Disk, Partition, FileName, 0, FileHandle);
+      if(returncode == ERR_FAILED){
+        /* File does not exist, the name is validated */
+        /* Probably there is space on the root dir */
+        /* Verifying if there is a file structure free */
+        *FileHandle = AFATS_MAX_FILES;
+        for(int i = 0; i < AFATS_MAX_FILES; i++){
+          if(!Fat32File[i].isInUse){
+            *FileHandle = i;
+            break;
+          }
+        }
+        if(*FileHandle >= AFATS_MAX_FILES){
+          returncode = ERR_RESOURCE_DEPLETED;
+        }else{
+          state[Disk] = FIND_EMPTY_CLUSTER;
+          returncode = OPERATION_RUNNING;
+        }
+      }else if(returncode == ANSWERED_REQUEST){
+        /* File already exists, closing file and returning error */
+        Fat32File[*FileHandle].isInUse = 0;
+        *FileHandle = AFATS_MAX_FILES;
+        returncode = ERR_FAILED;
+      }
+      break;
 
-    returncode = ERR_NOT_AVAILABLE;
+    case FIND_EMPTY_CLUSTER:
+      returncode = AFATFS_FindEmptyCluster(Disk, Partition, 0,
+          &entryNumber[Disk]);
+      if(returncode == ANSWERED_REQUEST){
+        state[Disk] = FIND_EMPTY_ROOT_ENTRY;
+        returncode = OPERATION_RUNNING;
+      }else if(returncode >= RETURN_ERROR_VALUE){
+        Fat32File[*FileHandle].isInUse = 0;
+        *FileHandle = AFATS_MAX_FILES;
+        entryNumber[Disk] = 0;
+        returncode = ERR_FAILED;
+      }
+      break;
+
+    case FIND_EMPTY_ROOT_ENTRY:
+      break;
+
+    default:
+      state[Disk] = FIND_FILE;
+      returncode = OPERATION_RUNNING;
+      break;
+
+    }
 
   }else{
     if(Disk >= AFATS_MAX_DISKS || Partition >= AFATS_MAX_PARTITIONS){
