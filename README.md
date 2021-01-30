@@ -203,18 +203,18 @@ void main(void)
 List of features ready and limitations
 * Open and read files alread existing in the root directory, subfolders not implemented
 * Write to files alread existing in the root directory
-* Can read and edit only the first 16 entries (one sector) of the root directory
+* Can read and edit only the entries on the first cluster of the root directory
 * Can read only the first cluster of a file, multicluster read not implemented
 * Can write only to the first cluster of a file, multicluster write not implemented
 * Number of files opened simultaneously, number of disks and other parameters are configurable through macros in "afatfs.h"
 * Map files (header and source) used to add disks so the library can use then
 
 To-do list:
-* Expand the number of entries read from root directory from one sector to one cluster
-* Add functions to create new files, and root directories
+* Add functions to create new files on root directory
 * Add support to multi-cluster sized files
 * Implement the extended name size for files and folders. Currently limited to 8 characters for the name and 3 for the extension (8.3)
 * Implement access to files inside subfolders
+* Expand the number of entries read from root directory from one cluster to more than one
 
 ## Status
 Project is: _in progress_. Functions are still being implemented.
