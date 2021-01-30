@@ -270,7 +270,7 @@ EStatus_t AFATFS_FindFile(uint8_t Disk, uint8_t Partition, uint8_t FileHandle)
 
   if(Disk < AFATS_MAX_DISKS && Partition < AFATS_MAX_PARTITIONS &&
       FatDisk[Disk].MBR.FatType[Partition] == FAT32_LBA &&
-      Fat32File[FileHandle].isInUse == 1)
+      Fat32File[FileHandle].isInUse == 1 && FileHandle < AFATS_MAX_FILES)
   {
 
     /* Reading one sector from root directory */
@@ -321,7 +321,7 @@ EStatus_t AFATFS_FindFile(uint8_t Disk, uint8_t Partition, uint8_t FileHandle)
           returncode = ANSWERED_REQUEST;
           break;
         }
-        else if(FatDisk[Disk].RootDir[Partition][i].Name[0] == 0x00)
+        else if(FatDisk[Disk].RootDir[Partition][i].Name[0] == FAT_END_OF_DIR)
         {
           /* Reached end of directory */
           Fat32File[FileHandle].Entry = 0;
@@ -356,7 +356,6 @@ EStatus_t AFATFS_FindFile(uint8_t Disk, uint8_t Partition, uint8_t FileHandle)
 
   return returncode;
 }
-
 
 
 
@@ -467,6 +466,33 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
 
 
 
+EStatus_t AFATFS_Create(uint8_t Disk, uint8_t Partition, char *FileName,
+    uint8_t Mode, uint8_t *FileHandle)
+{
+  EStatus_t returncode = OPERATION_RUNNING;
+
+  if(Disk < AFATS_MAX_DISKS && Disk < Disk_ListSize &&
+      FileName != NULL && FileHandle != NULL &&
+      FatDisk[Disk].isInitialized == 1)
+  {
+
+    returncode = ERR_NOT_AVAILABLE;
+
+  }else{
+    if(Disk >= AFATS_MAX_DISKS || Partition >= AFATS_MAX_PARTITIONS){
+      returncode = ERR_PARAM_VALUE;
+    }else if(FatDisk[Disk].MBR.FatType[Partition] != FAT32_LBA){
+      returncode = ERR_INVALID_FILE_SYSTEM;
+    }else{
+      returncode = ERR_PARAM_VALUE;
+    }
+  }
+
+  return returncode;
+}
+
+
+
 EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
     uint8_t Mode, uint8_t *FileHandle)
 {
@@ -480,7 +506,8 @@ EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
   char *p;
   uint32_t nameSize, extensionSize;
 
-  if(Disk < AFATS_MAX_DISKS && Disk < Disk_ListSize)
+  if(Disk < AFATS_MAX_DISKS && Disk < Disk_ListSize &&
+      FileName != NULL && FileHandle != NULL)
   {
     if(FatDisk[Disk].isInitialized == 1)
     {
@@ -579,7 +606,36 @@ EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
       returncode = ERR_DISABLED;
     }
   }else{
-    returncode = ERR_PARAM_VALUE;
+    if(FileName == NULL || FileHandle == NULL){
+      returncode = ERR_NULL_POINTER;
+    }else{
+      returncode = ERR_PARAM_VALUE;
+    }
+  }
+
+  return returncode;
+}
+
+
+
+EStatus_t AFATFS_Close(uint8_t Disk, uint8_t Partition, uint8_t *FileHandle)
+{
+  EStatus_t returncode = OPERATION_RUNNING;
+
+  if(Disk < AFATS_MAX_DISKS && Partition < AFATS_MAX_PARTITIONS &&
+      FileHandle != NULL && *FileHandle < AFATS_MAX_FILES &&
+      Fat32File[*FileHandle].isInUse == 1)
+  {
+
+    Fat32File[*FileHandle].isInUse = 0;
+    *FileHandle = AFATS_MAX_FILES;
+
+  }else{
+    if(FileHandle == NULL){
+      returncode = ERR_NULL_POINTER;
+    }else{
+      returncode = ERR_PARAM_VALUE;
+    }
   }
 
   return returncode;
@@ -591,7 +647,7 @@ EStatus_t AFATFS_Seek(uint8_t FileHandle, uint32_t Offset)
 {
   EStatus_t returncode = OPERATION_RUNNING;
 
-  if(Fat32File[FileHandle].isInUse == 1)
+  if(Fat32File[FileHandle].isInUse == 1 && FileHandle < AFATS_MAX_FILES)
   {
     if(Offset < Fat32File[FileHandle].LogicalSize)
     {
@@ -603,7 +659,11 @@ EStatus_t AFATFS_Seek(uint8_t FileHandle, uint32_t Offset)
       returncode = ERR_PARAM_OFFSET;
     }
   }else{
-    returncode = ERR_DISABLED;
+    if(FileHandle >= AFATS_MAX_FILES){
+      returncode = ERR_PARAM_VALUE;
+    }else{
+      returncode = ERR_DISABLED;
+    }
   }
 
   return returncode;
@@ -619,7 +679,7 @@ EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size,
   uint8_t Disk;
 
 
-  if(Fat32File[FileHandle].isInUse == 1)
+  if(Fat32File[FileHandle].isInUse == 1 && FileHandle < AFATS_MAX_FILES)
   {
     /*
      * Steps:
@@ -635,12 +695,14 @@ EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size,
      * using SectorPos and SectorPrev values.
      */
     if(Size == 0){
-      *BytesRead = 0;
+      if(BytesRead != NULL){ *BytesRead = 0;}
       returncode = ANSWERED_REQUEST;
     }else if( Fat32File[FileHandle].FilePos >=
         Fat32File[FileHandle].LogicalSize )
     {
       returncode = ERR_FAILED;
+    }else if(Buffer == NULL || BytesRead == NULL){
+      returncode = ERR_NULL_POINTER;
     }else
     {
       Disk = Fat32File[FileHandle].Disk;
@@ -701,7 +763,11 @@ EStatus_t AFATFS_Read(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size,
     }
 
   }else{
-    returncode = ERR_DISABLED;
+    if(FileHandle >= AFATS_MAX_FILES){
+      returncode = ERR_PARAM_VALUE;
+    }else{
+      returncode = ERR_DISABLED;
+    }
   }
 
   return returncode;
@@ -719,7 +785,7 @@ EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size)
   uint8_t Disk, Partition;
   uint32_t Entry;
 
-  if(Fat32File[FileHandle].isInUse == 1)
+  if(Fat32File[FileHandle].isInUse == 1 && FileHandle < AFATS_MAX_FILES)
   {
     /*
      * Steps:
@@ -742,6 +808,8 @@ EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size)
     }else if( Fat32File[FileHandle].FilePos + Size >=
         Fat32File[FileHandle].PhysicalSize ){
       returncode = ERR_FAILED;
+    }else if(Buffer == NULL){
+      returncode = ERR_NULL_POINTER;
     }else
     {
       Disk = Fat32File[FileHandle].Disk;
@@ -879,7 +947,11 @@ EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size)
     }
 
   }else{
-    returncode = ERR_DISABLED;
+    if(FileHandle >= AFATS_MAX_FILES){
+      returncode = ERR_PARAM_VALUE;
+    }else{
+      returncode = ERR_DISABLED;
+    }
   }
 
   return returncode;

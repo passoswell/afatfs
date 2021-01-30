@@ -35,6 +35,9 @@
 #define FAT_LENGTH_OFFSET                                                     12
 
 
+#define FAT_END_OF_DIR                                                      0x00
+#define FAT_UNUSED_ENTRY                                                    0xE5
+
 
 /**
  * @brief Valid values for FAT type field on a FAT32's primary partition record.

@@ -78,7 +78,20 @@ EStatus_t AFATFS_Mount(uint8_t Disk);
 
 
 /**
- * @brief  This routine opens a file.
+ * @brief  This routine creates an empty file on root directory.
+ * @param  Disk : A number that will identify the disk.
+ * @param  Partition : A number that will identify a partition.
+ * @param  FileName : A string containing the file name.
+ * @param  Mode : The mode in wich the file will be created.
+ * @param  FileHandle : A value returned by the function to identify the file.
+ * @retval EStatus_t
+ */
+EStatus_t AFATFS_Create(uint8_t Disk, uint8_t Partition, char *FileName,
+    uint8_t Mode, uint8_t *FileHandle);
+
+
+/**
+ * @brief  This routine opens a file from root directory.
  * @param  Disk : A number that will identify the disk.
  * @param  Partition : A number that will identify a partition.
  * @param  FileName : A string containing the file name.
@@ -88,6 +101,18 @@ EStatus_t AFATFS_Mount(uint8_t Disk);
  */
 EStatus_t AFATFS_Open(uint8_t Disk, uint8_t Partition, char *FileName,
     uint8_t Mode, uint8_t *FileHandle);
+
+
+/**
+ * @brief  This routine closes a file from root directory.
+ * @param  Disk : A number that will identify the disk.
+ * @param  Partition : A number that will identify a partition.
+ * @param  FileHandle : A handle to the file.
+ * @note   This function only free the memory used to handle the file. Any
+ *         write operation is performed inside AFATFS_Write.
+ * @retval EStatus_t
+ */
+EStatus_t AFATFS_Close(uint8_t Disk, uint8_t Partition, uint8_t *FileHandle);
 
 
 /**
