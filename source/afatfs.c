@@ -64,6 +64,7 @@ struct
   DirectoryEntryFat32_t            RootDir[AFATS_MAX_PARTITIONS][16];
   /*afatfsFile_t                     File[AFATS_MAX_FILES];*/
   uint8_t                          Buffer[AFATFS_MAX_SECTOR_SIZE];
+  uint8_t                          Busy;
   /* DiskIO_t                         DiskIO; */
 }FatDisk[AFATS_MAX_DISKS];
 
@@ -267,7 +268,7 @@ static EStatus_t AFATFS_FindEmptyRootEntry(uint8_t Disk, uint8_t Partition,
     uint32_t *Entry)
 {
   EStatus_t returncode = OPERATION_RUNNING;
-  static uint8_t sectorOffset[AFATS_MAX_DISKS];
+  static uint32_t sectorOffset[AFATS_MAX_DISKS];
 
   if(Disk < AFATS_MAX_DISKS && Partition < AFATS_MAX_PARTITIONS)
   {
@@ -301,6 +302,47 @@ static EStatus_t AFATFS_FindEmptyRootEntry(uint8_t Disk, uint8_t Partition,
 
   return returncode;
 }
+
+
+
+static EStatus_t AFATFS_AddRootEntry(uint8_t Disk, uint8_t Partition,
+    uint32_t *Entry)
+{
+  //enum{READ_ROOT_DIR = 0, WRITE_TO_ROOT_DIR};
+  EStatus_t returncode = OPERATION_RUNNING;
+  //static uint8_t state[AFATS_MAX_DISKS];
+  uint32_t sectorOffset;
+
+  if(Disk < AFATS_MAX_DISKS && Partition < AFATS_MAX_PARTITIONS)
+  {
+    sectorOffset = (*Entry) / 16;
+    returncode = AFATFS_WriteRootDirEntry(Disk, Partition, sectorOffset);
+
+//    switch(state[Disk])
+//    {
+//    case READ_ROOT_DIR:
+//      sectorOffset = (*Entry) / 16;
+//      returncode = AFATFS_ReadRootDirEntry(Disk, Partition, sectorOffset);
+//      if(returncode == ANSWERED_REQUEST){
+//        sectorOffset = (*Entry) - 16 * sectorOffset;
+//
+//      }
+//      break;
+//    default:
+//      state[Disk] = READ_ROOT_DIR;
+//      returncode = OPERATION_RUNNING;
+//      break;
+//    }
+
+  }else{
+    //state[Disk] = READ_ROOT_DIR;
+    returncode = ERR_PARAM_VALUE;
+  }
+
+  return returncode;
+}
+
+
 
 
 static EStatus_t AFATFS_FindEmptyCluster(uint8_t Disk, uint8_t Partition,
@@ -356,6 +398,70 @@ static EStatus_t AFATFS_FindEmptyCluster(uint8_t Disk, uint8_t Partition,
       returncode = ERR_INVALID_FILE_SYSTEM;
     }
     sector[Disk] = 0;
+  }
+
+  return returncode;
+}
+
+
+
+static EStatus_t AFATFS_AllocateCluster(uint8_t Disk, uint8_t Partition,
+    uint8_t FatNum, uint32_t *EntryNumber)
+{
+  enum{READ_SECTOR = 0, WRITE_TO_SECTOR};
+  EStatus_t returncode = OPERATION_RUNNING;
+  static uint8_t state[AFATS_MAX_DISKS];
+  uint32_t sector;
+
+  if(Disk < AFATS_MAX_DISKS && Partition < AFATS_MAX_PARTITIONS &&
+      FatDisk[Disk].MBR.FatType[Partition] == FAT32_LBA &&
+      EntryNumber != NULL)
+  {
+
+    switch(state[Disk])
+    {
+    case READ_SECTOR:
+      sector = *EntryNumber / 128;
+      returncode = Disk_List[Disk].Read(FatDisk[Disk].Buffer,
+          FatDisk[Disk].PPR.FatStartSector[Partition] +
+          (FatNum * FatDisk[Disk].PPR.FatSize[Partition]) + sector, 1);
+      if(returncode == ANSWERED_REQUEST)
+      {
+        returncode = OPERATION_RUNNING;
+        sector = *EntryNumber - 128 * sector;
+        FatDisk[Disk].Buffer[4*sector] = 0xFF;
+        FatDisk[Disk].Buffer[4*sector + 1] = 0xFF;
+        FatDisk[Disk].Buffer[4*sector + 2] = 0xFF;
+        FatDisk[Disk].Buffer[4*sector + 3] = 0xFF;
+        state[Disk] = WRITE_TO_SECTOR;
+      }
+      break;
+
+    case WRITE_TO_SECTOR:
+      sector = *EntryNumber / 128;
+      returncode = Disk_List[Disk].Write(FatDisk[Disk].Buffer,
+          FatDisk[Disk].PPR.FatStartSector[Partition] +
+          (FatNum * FatDisk[Disk].PPR.FatSize[Partition]) + sector, 1);
+      if(returncode == ANSWERED_REQUEST || returncode >= RETURN_ERROR_VALUE){
+        state[Disk] = READ_SECTOR;
+      }
+      break;
+
+    default:
+      state[Disk] = READ_SECTOR;
+      returncode = OPERATION_RUNNING;
+      break;
+    }
+
+  }else{
+    if(FatDisk[Disk].MBR.FatType[Partition] != FAT32_LBA){
+      returncode = ERR_PARAM_VALUE;
+    }else if(EntryNumber == NULL){
+      returncode = ERR_NULL_POINTER;
+    }else{
+      returncode = ERR_INVALID_FILE_SYSTEM;
+    }
+    state[Disk] = 0;
   }
 
   return returncode;
@@ -518,6 +624,7 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
             errorCounter[Disk] = 0;
             partCounter[Disk] = 0;
             FatDisk[Disk].isInitialized = 1;
+            FatDisk[Disk].Busy = 0xFF; /* Not busy */
             state[Disk] = NOP;
           }else{
             returncode = OPERATION_RUNNING;
@@ -530,6 +637,7 @@ EStatus_t AFATFS_Mount(uint8_t Disk)
             if(errorCounter[Disk] < AFATS_MAX_PARTITIONS){
               /* At least one valid partition was found */
               FatDisk[Disk].isInitialized = 1;
+              FatDisk[Disk].Busy = 0xFF; /* Not busy */
               state[Disk] = NOP;
               returncode = ANSWERED_REQUEST;
             }else{
@@ -576,6 +684,9 @@ EStatus_t AFATFS_Create(uint8_t Disk, uint8_t Partition, char *FileName,
   static uint8_t state[AFATS_MAX_DISKS];
   static uint32_t fatEntry[AFATS_MAX_DISKS];
   static uint32_t rootEntry[AFATS_MAX_DISKS];
+  DirectoryEntryFat32_t *entryPointer;
+  char *p;
+  uint32_t nameSize, extensionSize;
 
   if(Disk < AFATS_MAX_DISKS && Disk < Disk_ListSize &&
       FileName != NULL && FileHandle != NULL &&
@@ -626,8 +737,7 @@ EStatus_t AFATFS_Create(uint8_t Disk, uint8_t Partition, char *FileName,
       break;
 
     case FIND_EMPTY_CLUSTER:
-      returncode = AFATFS_FindEmptyCluster(Disk, Partition, 0,
-          &fatEntry[Disk]);
+      returncode = AFATFS_FindEmptyCluster(Disk, Partition, 0, &fatEntry[Disk]);
       if(returncode == ANSWERED_REQUEST){
         state[Disk] = FIND_EMPTY_ROOT_ENTRY;
         returncode = OPERATION_RUNNING;
@@ -642,7 +752,56 @@ EStatus_t AFATFS_Create(uint8_t Disk, uint8_t Partition, char *FileName,
     case FIND_EMPTY_ROOT_ENTRY:
       returncode = AFATFS_FindEmptyRootEntry(Disk, Partition, &rootEntry[Disk]);
       if(returncode == ANSWERED_REQUEST){
-        state[Disk] = ALOCATE_CLUSTER;
+        entryPointer = &FatDisk[Disk].RootDir[Partition][rootEntry[Disk]%16];
+        entryPointer->Attributes = 0;
+        p = strchr(FileName,'.');
+        if(p != NULL){
+          /* File has extension */
+          nameSize = p - FileName;
+          extensionSize = strlen(FileName) - nameSize -1;
+          /* Completing with spaces */
+          memset(entryPointer->Name, ' ', 8);
+          memset(entryPointer->Ext, ' ', 3);
+          /* Copying the name */
+          memcpy(entryPointer->Name, FileName, nameSize);
+          /* Copying the extension */
+          memcpy(entryPointer->Ext,
+              FileName + nameSize + 1 , extensionSize);
+        }else{
+          /* File has no extension */
+          nameSize = strlen(FileName);
+          /* Completing with spaces */
+          memset(entryPointer->Name, ' ', 8);
+          memset(entryPointer->Ext, ' ', 3);
+          /* Copying the name */
+          memcpy(entryPointer->Name, FileName, nameSize);
+        }
+        entryPointer->Size = 0;
+        entryPointer->aTime = 0;
+        entryPointer->cDate = 0;
+        entryPointer->cTime = 0;
+        entryPointer->cTime = 0;
+        entryPointer->cTimeTenth = 0;
+        entryPointer->wDate = 0;
+        entryPointer->wTime = 0;
+
+//        Fat32File[FileHandle].ClusterFirst =
+//            (uint32_t) (FatDisk[Disk].RootDir[Partition][i].FirstClusterHi
+//                << 16) |
+//                FatDisk[Disk].RootDir[Partition][i].FirstClusterLow;
+
+
+//        Fat32File[FileHandle].SectorFirst =
+//            FatDisk[Disk].PPR.DataStartSector[Partition] +
+//            ( FatDisk[Disk].PPR.SectorPerCluster[Partition] *
+//                (Fat32File[FileHandle].ClusterFirst - 2) );
+//        Fat32File[FileHandle].SectorPos =
+//            Fat32File[FileHandle].SectorFirst;
+//        Fat32File[FileHandle].SectorPrev = 0; /*Invalid value*/
+
+        //entryPointer->FirstClusterLow = (uint16_t)
+        //entryPointer->FirstClusterHi
+        //state[Disk] = ALOCATE_CLUSTER;
         returncode = OPERATION_RUNNING;
       }else if(returncode >= RETURN_ERROR_VALUE){
         Fat32File[*FileHandle].isInUse = 0;
@@ -654,6 +813,41 @@ EStatus_t AFATFS_Create(uint8_t Disk, uint8_t Partition, char *FileName,
       break;
 
     case ALOCATE_CLUSTER:
+      /* If something goes wrong between ALOCATE_CLUSTER and WRITE_ROOT_ENTRY
+       * states, one of the listed bellow can happen:
+       * 1 - One cluster is marked as used, but an error occur while adding the
+       *     root entry. The cluster is lost until disk is formatted.
+       * 2 - An error occur while allocating the cluster, but it pass as if
+       *     everything is OK and the entry is added to the root dir. Not sure
+       *     about what might happen when plugging the card on a computer, but
+       *     the file migt end up being overwritten.
+       *   */
+      returncode = AFATFS_AllocateCluster(Disk, Partition, 0, &fatEntry[Disk]);
+      if(returncode == ANSWERED_REQUEST){
+        state[Disk] = WRITE_ROOT_ENTRY;
+        returncode = OPERATION_RUNNING;
+      }else if(returncode >= RETURN_ERROR_VALUE){
+        Fat32File[*FileHandle].isInUse = 0;
+        *FileHandle = AFATS_MAX_FILES;
+        fatEntry[Disk] = 0;
+        rootEntry[Disk] = 0;
+        returncode = ERR_FAILED;
+      }
+      break;
+
+    case WRITE_ROOT_ENTRY:
+
+      returncode = AFATFS_AddRootEntry(Disk, Partition, &rootEntry[Disk]);
+      if(returncode == ANSWERED_REQUEST){
+        state[Disk] = ALOCATE_CLUSTER;
+        returncode = OPERATION_RUNNING;
+      }else if(returncode >= RETURN_ERROR_VALUE){
+        Fat32File[*FileHandle].isInUse = 0;
+        *FileHandle = AFATS_MAX_FILES;
+        fatEntry[Disk] = 0;
+        rootEntry[Disk] = 0;
+        returncode = ERR_FAILED;
+      }
       break;
 
     default:
