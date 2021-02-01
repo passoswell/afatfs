@@ -725,6 +725,7 @@ EStatus_t AFATFS_Create(uint8_t Disk, uint8_t Partition, char *FileName,
         if(*FileHandle >= AFATS_MAX_FILES){
           returncode = ERR_RESOURCE_DEPLETED;
         }else{
+          Fat32File[*FileHandle].isInUse = 1;
           state[Disk] = FIND_EMPTY_CLUSTER;
           returncode = OPERATION_RUNNING;
         }
@@ -752,8 +753,9 @@ EStatus_t AFATFS_Create(uint8_t Disk, uint8_t Partition, char *FileName,
     case FIND_EMPTY_ROOT_ENTRY:
       returncode = AFATFS_FindEmptyRootEntry(Disk, Partition, &rootEntry[Disk]);
       if(returncode == ANSWERED_REQUEST){
+        /* Building an new entry on a global variable */
         entryPointer = &FatDisk[Disk].RootDir[Partition][rootEntry[Disk]%16];
-        entryPointer->Attributes = 0;
+        entryPointer->Attributes = 0; /* Nothing special */
         p = strchr(FileName,'.');
         if(p != NULL){
           /* File has extension */
@@ -776,32 +778,19 @@ EStatus_t AFATFS_Create(uint8_t Disk, uint8_t Partition, char *FileName,
           /* Copying the name */
           memcpy(entryPointer->Name, FileName, nameSize);
         }
+        /* No date and time support for now */
         entryPointer->Size = 0;
         entryPointer->aTime = 0;
         entryPointer->cDate = 0;
-        entryPointer->cTime = 0;
         entryPointer->cTime = 0;
         entryPointer->cTimeTenth = 0;
         entryPointer->wDate = 0;
         entryPointer->wTime = 0;
 
-//        Fat32File[FileHandle].ClusterFirst =
-//            (uint32_t) (FatDisk[Disk].RootDir[Partition][i].FirstClusterHi
-//                << 16) |
-//                FatDisk[Disk].RootDir[Partition][i].FirstClusterLow;
+        entryPointer->FirstClusterLow = fatEntry[Disk] & 0xFFFF;
+        entryPointer->FirstClusterHi = (fatEntry[Disk] >> 16) & 0xFFFF;
 
-
-//        Fat32File[FileHandle].SectorFirst =
-//            FatDisk[Disk].PPR.DataStartSector[Partition] +
-//            ( FatDisk[Disk].PPR.SectorPerCluster[Partition] *
-//                (Fat32File[FileHandle].ClusterFirst - 2) );
-//        Fat32File[FileHandle].SectorPos =
-//            Fat32File[FileHandle].SectorFirst;
-//        Fat32File[FileHandle].SectorPrev = 0; /*Invalid value*/
-
-        //entryPointer->FirstClusterLow = (uint16_t)
-        //entryPointer->FirstClusterHi
-        //state[Disk] = ALOCATE_CLUSTER;
+        state[Disk] = ALOCATE_CLUSTER;
         returncode = OPERATION_RUNNING;
       }else if(returncode >= RETURN_ERROR_VALUE){
         Fat32File[*FileHandle].isInUse = 0;
@@ -839,8 +828,38 @@ EStatus_t AFATFS_Create(uint8_t Disk, uint8_t Partition, char *FileName,
 
       returncode = AFATFS_AddRootEntry(Disk, Partition, &rootEntry[Disk]);
       if(returncode == ANSWERED_REQUEST){
-        state[Disk] = ALOCATE_CLUSTER;
-        returncode = OPERATION_RUNNING;
+
+        entryPointer = &FatDisk[Disk].RootDir[Partition][rootEntry[Disk]%16];
+        memcpy(Fat32File[*FileHandle].Name, entryPointer->Name, 8);
+        memcpy(Fat32File[*FileHandle].Extension, entryPointer->Ext, 3);
+        Fat32File[*FileHandle].Disk = Disk;
+        Fat32File[*FileHandle].Partition = Partition;
+        Fat32File[*FileHandle].Entry = rootEntry[Disk];
+
+        Fat32File[*FileHandle].FilePos = 0; /*Start of file*/
+        Fat32File[*FileHandle].LogicalSize = 0;
+        /* Considering a file is only one cluster in size */
+        Fat32File[*FileHandle].PhysicalSize =
+            512 * FatDisk[Disk].PPR.SectorPerCluster[Partition];
+
+        Fat32File[*FileHandle].ClusterFirst =
+            (uint32_t) (entryPointer->FirstClusterHi << 16) |
+                entryPointer->FirstClusterLow;
+        Fat32File[*FileHandle].ClusterPos =
+            Fat32File[*FileHandle].ClusterFirst;
+        Fat32File[*FileHandle].ClusterPrev = 0; /*Invalid value*/
+
+        Fat32File[*FileHandle].SectorFirst =
+            FatDisk[Disk].PPR.DataStartSector[Partition] +
+            ( FatDisk[Disk].PPR.SectorPerCluster[Partition] *
+                (Fat32File[*FileHandle].ClusterFirst - 2) );
+        Fat32File[*FileHandle].SectorPos =
+            Fat32File[*FileHandle].SectorFirst;
+        Fat32File[*FileHandle].SectorPrev = 0; /*Invalid value*/
+
+        state[Disk] = FIND_FILE;
+        returncode = ANSWERED_REQUEST;
+
       }else if(returncode >= RETURN_ERROR_VALUE){
         Fat32File[*FileHandle].isInUse = 0;
         *FileHandle = AFATS_MAX_FILES;

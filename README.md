@@ -202,6 +202,7 @@ void main(void)
 ## Features and limitations
 List of features ready and limitations
 * Open and read files alread existing in the root directory, subfolders not implemented
+* Create new, one cluster sized (physical size) files
 * Write to files alread existing in the root directory
 * Can read and edit only the entries on the first cluster of the root directory
 * Can read only the first cluster of a file, multicluster read not implemented
@@ -210,7 +211,6 @@ List of features ready and limitations
 * Map files (header and source) used to add disks so the library can use then
 
 To-do list:
-* Add functions to create new files on root directory
 * Add support to multi-cluster sized files
 * Implement the extended name size for files and folders. Currently limited to 8 characters for the name and 3 for the extension (8.3)
 * Implement access to files inside subfolders
