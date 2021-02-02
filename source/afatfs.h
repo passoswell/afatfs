@@ -14,6 +14,7 @@
 
 #include <stdint.h>
 #include "stdstatus.h"
+#include "setup.h"
 
 
 /**
