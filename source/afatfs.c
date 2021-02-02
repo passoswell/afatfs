@@ -308,34 +308,14 @@ static EStatus_t AFATFS_FindEmptyRootEntry(uint8_t Disk, uint8_t Partition,
 static EStatus_t AFATFS_AddRootEntry(uint8_t Disk, uint8_t Partition,
     uint32_t *Entry)
 {
-  //enum{READ_ROOT_DIR = 0, WRITE_TO_ROOT_DIR};
   EStatus_t returncode = OPERATION_RUNNING;
-  //static uint8_t state[AFATS_MAX_DISKS];
   uint32_t sectorOffset;
 
   if(Disk < AFATS_MAX_DISKS && Partition < AFATS_MAX_PARTITIONS)
   {
     sectorOffset = (*Entry) / 16;
     returncode = AFATFS_WriteRootDirEntry(Disk, Partition, sectorOffset);
-
-//    switch(state[Disk])
-//    {
-//    case READ_ROOT_DIR:
-//      sectorOffset = (*Entry) / 16;
-//      returncode = AFATFS_ReadRootDirEntry(Disk, Partition, sectorOffset);
-//      if(returncode == ANSWERED_REQUEST){
-//        sectorOffset = (*Entry) - 16 * sectorOffset;
-//
-//      }
-//      break;
-//    default:
-//      state[Disk] = READ_ROOT_DIR;
-//      returncode = OPERATION_RUNNING;
-//      break;
-//    }
-
   }else{
-    //state[Disk] = READ_ROOT_DIR;
     returncode = ERR_PARAM_VALUE;
   }
 
