@@ -61,7 +61,7 @@ struct
   uint8_t                          isInitialized;
   ReducedMasterBootRecord_t        MBR;
   ReducedPartitionParameterTable_t PPR;
-  DirectoryEntryFat32_t            RootDir[AFATS_MAX_PARTITIONS][16];
+  DirectoryEntryFat32_t            RootDir[16];
   /*afatfsFile_t                     File[AFATS_MAX_FILES];*/
   uint8_t                          Buffer[AFATFS_MAX_SECTOR_SIZE];
   uint8_t                          Busy;
@@ -198,8 +198,8 @@ static EStatus_t AFATFS_ReadRootDirEntry(uint8_t Disk, uint8_t Partition,
             FatDisk[Disk].PPR.RootSector[Partition] + SectorOffset, 1);
         if(returncode == ANSWERED_REQUEST)
         {
-          memcpy(&FatDisk[Disk].RootDir[Partition][0], FatDisk[Disk].Buffer,
-              sizeof(FatDisk[Disk].RootDir[0]));
+          memcpy(&FatDisk[Disk].RootDir[0], FatDisk[Disk].Buffer,
+              sizeof(FatDisk[Disk].RootDir));
         }
       }
       else
@@ -238,8 +238,8 @@ static EStatus_t AFATFS_WriteRootDirEntry(uint8_t Disk, uint8_t Partition,
           FatDisk[Disk].PPR.SectorPerCluster[Partition];
       if(clusterOffset == 0){
 
-        memcpy(FatDisk[Disk].Buffer, &FatDisk[Disk].RootDir[Partition][0],
-            sizeof(FatDisk[Disk].RootDir[0]));
+        memcpy(FatDisk[Disk].Buffer, &FatDisk[Disk].RootDir[0],
+            sizeof(FatDisk[Disk].RootDir));
 
         returncode = Disk_List[Disk].Write(FatDisk[Disk].Buffer,
             FatDisk[Disk].PPR.RootSector[Partition] + SectorOffset, 1);
@@ -277,8 +277,8 @@ static EStatus_t AFATFS_FindEmptyRootEntry(uint8_t Disk, uint8_t Partition,
     if(returncode == ANSWERED_REQUEST){
       *Entry = 0xFFFFFFFF;
       for(int i = 0; i < 16; i++){
-        if(FatDisk[Disk].RootDir[Partition][i].Name[0] == FAT_END_OF_DIR ||
-            FatDisk[Disk].RootDir[Partition][i].Name[0] == FAT_UNUSED_ENTRY){
+        if(FatDisk[Disk].RootDir[i].Name[0] == FAT_END_OF_DIR ||
+            FatDisk[Disk].RootDir[i].Name[0] == FAT_UNUSED_ENTRY){
           *Entry = (sectorOffset[Disk] * 16) + i;
           break;
         }
@@ -488,13 +488,13 @@ static EStatus_t AFATFS_FindFile(uint8_t Disk, uint8_t Partition,
     {
 
       returncode = OPERATION_RUNNING;
-      memcpy(&FatDisk[Disk].RootDir[Partition][0], FatDisk[Disk].Buffer,
-          sizeof(FatDisk[Disk].RootDir[0]));
+      memcpy(&FatDisk[Disk].RootDir[0], FatDisk[Disk].Buffer,
+          sizeof(FatDisk[Disk].RootDir));
       for(int i = 0; i < 16; i++)
       {
-        if(!memcmp(FatDisk[Disk].RootDir[Partition][i].Name,
+        if(!memcmp(FatDisk[Disk].RootDir[i].Name,
             Fat32File[FileHandle].Name, 8) &&
-            !memcmp(FatDisk[Disk].RootDir[Partition][i].Ext,
+            !memcmp(FatDisk[Disk].RootDir[i].Ext,
                 Fat32File[FileHandle].Extension, 3))
         {
           /* File was found */
@@ -503,15 +503,15 @@ static EStatus_t AFATFS_FindFile(uint8_t Disk, uint8_t Partition,
           Fat32File[FileHandle].Entry += i;
           Fat32File[FileHandle].FilePos = 0; /*Start of file*/
           Fat32File[FileHandle].LogicalSize =
-              FatDisk[Disk].RootDir[Partition][i].Size;
+              FatDisk[Disk].RootDir[i].Size;
           /* Considering a file is only one cluster in size */
           Fat32File[FileHandle].PhysicalSize =
               512 * FatDisk[Disk].PPR.SectorPerCluster[Partition];
 
           Fat32File[FileHandle].ClusterFirst =
-              (uint32_t) (FatDisk[Disk].RootDir[Partition][i].FirstClusterHi
+              (uint32_t) (FatDisk[Disk].RootDir[i].FirstClusterHi
                   << 16) |
-                  FatDisk[Disk].RootDir[Partition][i].FirstClusterLow;
+                  FatDisk[Disk].RootDir[i].FirstClusterLow;
           Fat32File[FileHandle].ClusterPos =
               Fat32File[FileHandle].ClusterFirst;
           Fat32File[FileHandle].ClusterPrev = 0; /*Invalid value*/
@@ -528,7 +528,7 @@ static EStatus_t AFATFS_FindFile(uint8_t Disk, uint8_t Partition,
           returncode = ANSWERED_REQUEST;
           break;
         }
-        else if(FatDisk[Disk].RootDir[Partition][i].Name[0] == FAT_END_OF_DIR)
+        else if(FatDisk[Disk].RootDir[i].Name[0] == FAT_END_OF_DIR)
         {
           /* Reached end of directory */
           Fat32File[FileHandle].Entry = 0;
@@ -754,7 +754,7 @@ EStatus_t AFATFS_Create(uint8_t Disk, uint8_t Partition, char *FileName,
       returncode = AFATFS_FindEmptyRootEntry(Disk, Partition, &rootEntry[Disk]);
       if(returncode == ANSWERED_REQUEST){
         /* Building an new entry on a global variable */
-        entryPointer = &FatDisk[Disk].RootDir[Partition][rootEntry[Disk]%16];
+        entryPointer = &FatDisk[Disk].RootDir[rootEntry[Disk]%16];
         entryPointer->Attributes = 0; /* Nothing special */
         p = strchr(FileName,'.');
         if(p != NULL){
@@ -829,7 +829,7 @@ EStatus_t AFATFS_Create(uint8_t Disk, uint8_t Partition, char *FileName,
       returncode = AFATFS_AddRootEntry(Disk, Partition, &rootEntry[Disk]);
       if(returncode == ANSWERED_REQUEST){
 
-        entryPointer = &FatDisk[Disk].RootDir[Partition][rootEntry[Disk]%16];
+        entryPointer = &FatDisk[Disk].RootDir[rootEntry[Disk]%16];
         memcpy(Fat32File[*FileHandle].Name, entryPointer->Name, 8);
         memcpy(Fat32File[*FileHandle].Extension, entryPointer->Ext, 3);
         Fat32File[*FileHandle].Disk = Disk;
@@ -1307,7 +1307,7 @@ EStatus_t AFATFS_Write(uint8_t FileHandle, uint8_t *Buffer, uint32_t Size)
           if(returncode == ANSWERED_REQUEST){
             returncode = OPERATION_RUNNING;
             Entry = Entry - ((Entry / 16) * 16); /* Entry MOD 16 */
-            FatDisk[Disk].RootDir[Partition][Entry].Size =
+            FatDisk[Disk].RootDir[Entry].Size =
                 Fat32File[FileHandle].FilePos + Size;
             state[Disk] = UPDATE_ENTRY;
           }else if(returncode >= RETURN_ERROR_VALUE){
